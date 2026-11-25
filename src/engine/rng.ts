@@ -1,25 +1,24 @@
-// @ts-nocheck
 export class Rng {
-  s;
-  constructor(seed) {
+  s: number;
+  constructor(seed: number) {
     this.s = seed >>> 0 || 2654435769;
   }
-  next() {
+  next(): number {
     let t = this.s = this.s + 1831565813 >>> 0;
     t = Math.imul(t ^ t >>> 15, t | 1);
     t ^= t + Math.imul(t ^ t >>> 7, t | 61);
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   }
-  range(lo, hi) {
+  range(lo: number, hi: number): number {
     return lo + (hi - lo) * this.next();
   }
-  sym(m2) {
+  sym(m2: number): number {
     return (this.next() * 2 - 1) * m2;
   }
-  int(lo, hiInclusive) {
+  int(lo: number, hiInclusive: number): number {
     return lo + Math.floor(this.next() * (hiInclusive - lo + 1));
   }
-  pick(items) {
+  pick<T>(items: readonly T[]): T {
     return items[Math.floor(this.next() * items.length)];
   }
 }

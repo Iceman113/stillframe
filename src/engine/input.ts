@@ -1,4 +1,3 @@
-// @ts-nocheck
 const DEFAULT_BINDINGS = {
   moveForward: ["KeyW", "ArrowUp"],
   moveBack: ["KeyS", "ArrowDown"],
@@ -17,9 +16,11 @@ const DEFAULT_BINDINGS = {
   debugTimeRealtime: ["F3"],
   debugOverlay: ["F4"]
 };
+/** Every bindable action. Keyboard codes are KeyboardEvent.code; mouse buttons are "Mouse<n>". */
+export type Action = keyof typeof DEFAULT_BINDINGS;
 const GAMEPAD_DEADZONE = 0.15;
 const GAMEPAD_LOOK_SPEED = 900;
-const GAMEPAD_BUTTONS = {
+const GAMEPAD_BUTTONS: Partial<Record<Action, number[]>> = {
   jump: [0],
   interact: [2],
   restart: [3],
@@ -28,23 +29,23 @@ const GAMEPAD_BUTTONS = {
   pause: [9]
 };
 export class Input {
-  target;
+  target: HTMLCanvasElement;
   mouseDx = 0;
   mouseDy = 0;
   padMoveX = 0;
   padMoveY = 0;
-  bindings = structuredClone(DEFAULT_BINDINGS);
-  down = new Set();
-  pressedRaw = new Set();
-  releasedRaw = new Set();
-  pressedFrame = new Set();
-  releasedFrame = new Set();
+  bindings: Record<Action, string[]> = structuredClone(DEFAULT_BINDINGS);
+  down = new Set<string>();
+  pressedRaw = new Set<string>();
+  releasedRaw = new Set<string>();
+  pressedFrame = new Set<string>();
+  releasedFrame = new Set<string>();
   accDx = 0;
   accDy = 0;
-  padButtonsPrev = [];
-  padActionsDown = new Set();
-  padActionsPressed = new Set();
-  constructor(target) {
+  padButtonsPrev: boolean[] = [];
+  padActionsDown = new Set<Action>();
+  padActionsPressed = new Set<Action>();
+  constructor(target: HTMLCanvasElement) {
     this.target = target;
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
@@ -55,10 +56,10 @@ export class Input {
     target.addEventListener("contextmenu", (e) => e.preventDefault());
     target.addEventListener("click", () => this.requestPointerLock());
   }
-  get pointerLocked() {
+  get pointerLocked(): boolean {
     return document.pointerLockElement === this.target;
   }
-  requestPointerLock() {
+  requestPointerLock(): void {
     if (this.pointerLocked)
       return;
     const req = this.target.requestPointerLock({ unadjustedMovement: true });
@@ -66,7 +67,7 @@ export class Input {
       this.target.requestPointerLock()?.catch((err) => console.warn("[input] pointer lock failed:", err));
     });
   }
-  update(realDt) {
+  update(realDt: number): void {
     this.pressedFrame.clear();
     this.releasedFrame.clear();
     for (const c of this.pressedRaw)
@@ -81,23 +82,23 @@ export class Input {
     this.accDy = 0;
     this.pollGamepad(realDt);
   }
-  isDown(action) {
+  isDown(action: Action): boolean {
     if (this.padActionsDown.has(action))
       return true;
     return this.bindings[action].some((c) => this.down.has(c));
   }
-  wasPressed(action) {
+  wasPressed(action: Action): boolean {
     if (this.padActionsPressed.has(action))
       return true;
     return this.bindings[action].some((c) => this.pressedFrame.has(c));
   }
-  anyPressed() {
+  anyPressed(): boolean {
     return this.pressedFrame.size > 0 || this.padActionsPressed.size > 0;
   }
-  wasReleased(action) {
+  wasReleased(action: Action): boolean {
     return this.bindings[action].some((c) => this.releasedFrame.has(c));
   }
-  moveAxes() {
+  moveAxes(): { x: number; y: number } {
     let x = (this.isDown("moveRight") ? 1 : 0) - (this.isDown("moveLeft") ? 1 : 0) + this.padMoveX;
     let y = (this.isDown("moveForward") ? 1 : 0) - (this.isDown("moveBack") ? 1 : 0) + this.padMoveY;
     const len2 = Math.hypot(x, y);
@@ -107,45 +108,45 @@ export class Input {
     }
     return { x, y };
   }
-  press(code) {
+  press(code: string): void {
     if (this.down.has(code))
       return;
     this.down.add(code);
     this.pressedRaw.add(code);
   }
-  release(code) {
+  release(code: string): void {
     if (!this.down.has(code))
       return;
     this.down.delete(code);
     this.releasedRaw.add(code);
   }
-  onKeyDown = (e) => {
+  onKeyDown = (e: KeyboardEvent): void => {
     if (e.code.startsWith("F") && e.code.length <= 3)
       e.preventDefault();
     if (e.code === "Space" || e.code === "Tab")
       e.preventDefault();
     this.press(e.code);
   };
-  onKeyUp = (e) => {
+  onKeyUp = (e: KeyboardEvent): void => {
     this.release(e.code);
   };
-  onMouseDown = (e) => {
+  onMouseDown = (e: MouseEvent): void => {
     this.press(`Mouse${e.button}`);
   };
-  onMouseUp = (e) => {
+  onMouseUp = (e: MouseEvent): void => {
     this.release(`Mouse${e.button}`);
   };
-  onMouseMove = (e) => {
+  onMouseMove = (e: MouseEvent): void => {
     if (!this.pointerLocked)
       return;
     this.accDx += e.movementX;
     this.accDy += e.movementY;
   };
-  onBlur = () => {
+  onBlur = (): void => {
     for (const c of [...this.down])
       this.release(c);
   };
-  pollGamepad(realDt) {
+  pollGamepad(realDt: number): void {
     this.padMoveX = 0;
     this.padMoveY = 0;
     this.padActionsPressed.clear();
@@ -155,7 +156,7 @@ export class Input {
       this.padActionsDown.clear();
       return;
     }
-    const dz = (v) => {
+    const dz = (v: number | undefined): number => {
       const a = v ?? 0;
       return Math.abs(a) < GAMEPAD_DEADZONE ? 0 : (a - Math.sign(a) * GAMEPAD_DEADZONE) / (1 - GAMEPAD_DEADZONE);
     };
@@ -163,8 +164,8 @@ export class Input {
     this.padMoveY = -dz(pad.axes[1]);
     this.mouseDx += dz(pad.axes[2]) * GAMEPAD_LOOK_SPEED * realDt;
     this.mouseDy += dz(pad.axes[3]) * GAMEPAD_LOOK_SPEED * realDt;
-    const nowDown = new Set();
-    for (const [action, buttons] of Object.entries(GAMEPAD_BUTTONS)) {
+    const nowDown = new Set<Action>();
+    for (const [action, buttons] of Object.entries(GAMEPAD_BUTTONS) as [Action, number[]][]) {
       for (const b of buttons) {
         const isDown = pad.buttons[b]?.pressed ?? false;
         if (isDown) {
