@@ -1,6 +1,37 @@
-// @ts-nocheck
 const KEY = "stillframe.save";
-function defaultSettings() {
+export type PostQuality = "low" | "medium" | "high";
+export interface Settings {
+  fov: number;
+  sensitivity: number;
+  invertY: boolean;
+  masterVolume: number;
+  sfxVolume: number;
+  musicVolume: number;
+  resolutionScale: number;
+  autoResolution: boolean;
+  postQuality: PostQuality;
+  showFps: boolean;
+  reduceMotion: boolean;
+  crosshairScale: number;
+}
+/** Settings keys whose value is a number (range sliders). */
+export type NumericSettingKey = { [K in keyof Settings]: Settings[K] extends number ? K : never }[keyof Settings];
+/** Settings keys whose value is a boolean (checkboxes). */
+export type BooleanSettingKey = { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings];
+export interface LevelRecord {
+  cleared: boolean;
+  /** Best real time in seconds. */
+  best?: number;
+  /** Simulated time of the best run in seconds. */
+  bestSim?: number;
+}
+export interface SaveData {
+  version: 1;
+  settings: Settings;
+  /** Keyed by level id. */
+  levels: Partial<Record<string, LevelRecord>>;
+}
+function defaultSettings(): Settings {
   return {
     fov: 90,
     sensitivity: 1,
@@ -16,13 +47,13 @@ function defaultSettings() {
     crosshairScale: 1
   };
 }
-export function loadSave() {
-  const fresh = { version: 1, settings: defaultSettings(), levels: {} };
+export function loadSave(): SaveData {
+  const fresh: SaveData = { version: 1, settings: defaultSettings(), levels: {} };
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw)
       return fresh;
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as Partial<SaveData>;
     if (parsed.version !== 1)
       return fresh;
     return {
@@ -35,7 +66,7 @@ export function loadSave() {
     return fresh;
   }
 }
-export function writeSave(data) {
+export function writeSave(data: SaveData): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(data));
   } catch (err) {

@@ -1,8 +1,7 @@
-// @ts-nocheck
 import { Game } from "./game/game";
 import { Gfx, UnsupportedError } from "./gfx/gfx";
 
-function showUnsupported(reason) {
+function showUnsupported(reason: string): void {
   const panel = document.getElementById("unsupported");
   const reasonEl = document.getElementById("unsupported-reason");
   if (reasonEl)
@@ -11,15 +10,15 @@ function showUnsupported(reason) {
     panel.hidden = false;
 }
 
-async function boot() {
-  const canvas = document.getElementById("gfx");
+async function boot(): Promise<void> {
+  const canvas = document.getElementById("gfx") as HTMLCanvasElement | null;
   const overlayEl = document.getElementById("overlay");
   if (!canvas || !overlayEl)
     throw new Error("Missing #gfx canvas or #overlay element.");
-  let game = null;
-  let gfx;
+  let game: Game | null = null;
+  let gfx: Gfx;
   try {
-    gfx = await Gfx.create(canvas, (info) => {
+    gfx = await Gfx.create(canvas, (info: GPUDeviceLostInfo) => {
       game?.stop();
       if (info.reason !== "destroyed")
         showUnsupported(`The GPU device was lost: ${info.message || info.reason}. Reload the page to continue.`);

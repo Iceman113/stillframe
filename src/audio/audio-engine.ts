@@ -1,19 +1,35 @@
-// @ts-nocheck
 import { SYNTHS } from "./synths";
+import type { Vec3 } from "../sim/types";
+export type SoundName = keyof typeof SYNTHS;
+/** Listener position and heading used for distance attenuation and stereo panning. */
+export interface Listener {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+}
+export interface PlayOptions {
+  /** Play at normal speed regardless of the current time scale. */
+  ignoreTime?: boolean;
+  pitch?: number;
+  volume?: number;
+  /** World position; omit for a non-positional (player) sound. */
+  pos?: Vec3;
+}
 
 export class AudioEngine {
-  ctx = null;
-  master = null;
-  sfxBus = null;
-  musicBus = null;
-  musicFilter = null;
-  droneGain = null;
-  buffers = new Map();
+  ctx: AudioContext | null = null;
+  master: GainNode | null = null;
+  sfxBus: GainNode | null = null;
+  musicBus: GainNode | null = null;
+  musicFilter: BiquadFilterNode | null = null;
+  droneGain: GainNode | null = null;
+  buffers = new Map<string, AudioBuffer>();
   timeScale = 1;
-  listener = { x: 0, y: 0, z: 0, yaw: 0 };
+  listener: Listener = { x: 0, y: 0, z: 0, yaw: 0 };
   volumes = { master: 0.8, sfx: 1, music: 0.5 };
   musicStarted = false;
-  unlock() {
+  unlock(): void {
     if (!this.ctx) {
       try {
         this.ctx = new AudioContext();
@@ -39,14 +55,14 @@ export class AudioEngine {
     if (this.ctx.state === "suspended")
       void this.ctx.resume();
   }
-  setVolumes(master, sfx, music) {
+  setVolumes(master: number, sfx: number, music: number): void {
     this.volumes = { master, sfx, music };
     this.applyVolumes();
   }
-  setListener(l) {
+  setListener(l: Listener): void {
     this.listener = l;
   }
-  setTimeScale(ts) {
+  setTimeScale(ts: number): void {
     this.timeScale = ts;
     const ctx = this.ctx;
     if (!ctx || !this.musicFilter || !this.droneGain)
@@ -55,7 +71,7 @@ export class AudioEngine {
     this.musicFilter.frequency.setTargetAtTime(180 + 3800 * ts * ts, now, 0.08);
     this.droneGain.gain.setTargetAtTime(ts < 0.1 ? 0.22 : 0, now, 0.25);
   }
-  play(name, opts = {}) {
+  play(name: SoundName, opts: PlayOptions = {}): void {
     const ctx = this.ctx;
     const buf = this.buffers.get(name);
     if (!ctx || !buf || !this.sfxBus)
@@ -89,14 +105,14 @@ export class AudioEngine {
     }
     src.start();
   }
-  applyVolumes() {
+  applyVolumes(): void {
     if (!this.master || !this.sfxBus || !this.musicBus)
       return;
     this.master.gain.value = this.volumes.master;
     this.sfxBus.gain.value = this.volumes.sfx;
     this.musicBus.gain.value = this.volumes.music * 0.5;
   }
-  startMusic() {
+  startMusic(): void {
     const ctx = this.ctx;
     if (!ctx || !this.musicFilter || this.musicStarted)
       return;
@@ -156,7 +172,7 @@ export class AudioEngine {
     drone.start(now);
     drone2.start(now);
   }
-  synthesizeAll() {
+  synthesizeAll(): void {
     const ctx = this.ctx;
     if (!ctx)
       return;

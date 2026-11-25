@@ -1,19 +1,19 @@
-// @ts-nocheck
+import type { Time } from "../engine/loop";
 export class DebugOverlay {
-  el;
+  el: HTMLElement;
   visible = true;
   frames = 0;
   accum = 0;
   fps = 0;
   frameMs = 0;
-  extra = {};
-  constructor(el) {
+  extra: Record<string, string> = {};
+  constructor(el: HTMLElement) {
     this.el = el;
   }
-  set(key, value) {
+  set(key: string, value: string): void {
     this.extra[key] = value;
   }
-  update(time) {
+  update(time: Time): void {
     this.frames++;
     this.accum += time.realDt;
     if (this.accum < 0.25)

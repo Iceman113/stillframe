@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { mat4 } from "wgpu-matrix";
 import { AudioEngine } from "../audio/audio-engine";
 import { Input } from "../engine/input";
@@ -22,25 +21,40 @@ import { computePose, createPose } from "../view/enemy-pose";
 import { FxSystem } from "../view/fx";
 import { PART_IDS, buildMeshLibrary } from "../view/mesh-library";
 import { Viewmodel } from "../view/viewmodel";
-
+import type { SoundName } from "../audio/audio-engine";
+import type { Time } from "../engine/loop";
+import type { Gfx } from "../gfx/gfx";
+import type { LevelDef } from "../levels/types";
+import type { Enemy, EnemyKind, SharedStatic, Vec3, WeaponKind, WorldEvent } from "../sim/types";
+import type { MeshLibrary } from "../view/mesh-library";
+import type { HudState } from "../ui/ui";
+import type { LevelScene } from "./level-loader";
+import type { LevelRecord, SaveData, Settings } from "./save";
+export type GameState = "title" | "intro" | "playing" | "paused" | "dead" | "cleared" | "results" | "replay";
+interface RunResults {
+  real: number;
+  sim: number;
+  kills: number;
+  shots: number;
+}
 const BASE_SENSITIVITY = 22e-4;
-const ENEMY_TINT = {
+const ENEMY_TINT: Record<EnemyKind, Vec3> = {
   walker: [0.8, 0.32, 1],
   rusher: [1, 0.26, 0.48],
   marksman: [0.42, 0.48, 1]
 };
-const ENEMY_EMISSIVE = { walker: 0.9, rusher: 1.1, marksman: 1 };
-const SHOT_SFX = { pistol: "pistol", scatter: "scatter", carbine: "carbine", blade: "whoosh" };
+const ENEMY_EMISSIVE: Record<EnemyKind, number> = { walker: 0.9, rusher: 1.1, marksman: 1 };
+const SHOT_SFX: Record<WeaponKind, SoundName> = { pistol: "pistol", scatter: "scatter", carbine: "carbine", blade: "whoosh" };
 export class Game {
-  gfx;
-  renderer;
-  input;
+  gfx: Gfx;
+  renderer: Renderer;
+  input: Input;
   audio = new AudioEngine();
-  ui;
-  overlay;
-  loop;
-  meshes;
-  save;
+  ui: Ui;
+  overlay: DebugOverlay;
+  loop: Loop;
+  meshes: MeshLibrary;
+  save: SaveData;
   camera = new Camera();
   vmCamera = new Camera();
   player = new PlayerController();
@@ -51,26 +65,26 @@ export class Game {
   pose = createPose();
   model = mat4.create();
   post = defaultPostParams();
-  state = "title";
+  state: GameState = "title";
   stateTime = 0;
   levelIndex = 0;
-  def = LEVELS[0];
-  scene = null;
-  shared = null;
-  sceneCache = new Map();
-  world;
-  replay = null;
+  def: LevelDef = LEVELS[0];
+  scene: LevelScene | null = null;
+  shared: SharedStatic | null = null;
+  sceneCache = new Map<string, { scene: LevelScene; shared: SharedStatic }>();
+  world!: World;
+  replay: ReplayPlayer | null = null;
   runRealTime = 0;
-  flash = [1, 1, 1, 0];
+  flash: number[] = [1, 1, 1, 0];
   threat = 0;
-  deathDir = [0, 0, -1];
-  telegraphing = new Set();
-  lastResults = null;
+  deathDir: Vec3 = [0, 0, -1];
+  telegraphing = new Set<number>();
+  lastResults: RunResults | null = null;
   debugOverlayForced = false;
   perfAccum = 0;
   perfFrames = 0;
   autoScale = 1;
-  constructor(gfx, canvas, overlayEl) {
+  constructor(gfx: Gfx, canvas: HTMLCanvasElement, overlayEl: HTMLElement) {
     this.gfx = gfx;
     this.renderer = new Renderer(gfx);
     this.input = new Input(canvas);
@@ -120,17 +134,17 @@ export class Game {
       render: (t) => this.render(t)
     });
   }
-  start() {
+  start(): void {
     this.loop.start();
   }
-  stop() {
+  stop(): void {
     this.loop.stop();
   }
-  firstUncleared() {
+  firstUncleared(): number {
     const i = LEVELS.findIndex((l) => !this.save.levels[l.id]?.cleared);
     return i < 0 ? 0 : i;
   }
-  loadLevel(index) {
+  loadLevel(index: number): void {
     this.levelIndex = clamp(index, 0, LEVELS.length - 1);
     this.def = LEVELS[this.levelIndex];
     let cached = this.sceneCache.get(this.def.id);
@@ -148,7 +162,7 @@ export class Game {
     this.renderer.setShadowBounds(this.scene.min, this.scene.max);
     this.resetWorld();
   }
-  resetWorld() {
+  resetWorld(): void {
     this.world = new World(this.def, this.shared ?? void 0);
     this.shared = this.world.staticData;
     this.player.reset(this.def.player.pos, this.def.player.yaw);
@@ -160,11 +174,11 @@ export class Game {
     this.flash = [1, 1, 1, 0];
     this.replay = null;
   }
-  setState(s) {
+  setState(s: GameState): void {
     this.state = s;
     this.stateTime = 0;
   }
-  startLevel(index, lock) {
+  startLevel(index: number, lock: boolean): void {
     if (!this.ui.isUnlocked(index))
       return;
     this.audio.unlock();
@@ -174,34 +188,34 @@ export class Game {
     this.ui.hideScreen();
     this.beginIntro(this.def.words, 0.34);
   }
-  beginIntro(words, wordTime) {
+  beginIntro(words: string[], wordTime: number): void {
     this.setState("intro");
     this.ui.titleCard(words, wordTime, () => {
       if (this.state === "intro")
         this.beginPlaying();
     });
   }
-  beginPlaying() {
+  beginPlaying(): void {
     this.setState("playing");
     this.loop.time.clearAccumulator();
     this.recorder.reset();
     this.runRealTime = 0;
   }
-  restart(lock) {
+  restart(lock: boolean): void {
     if (lock)
       this.input.requestPointerLock();
     this.ui.hideScreen();
     this.resetWorld();
     this.beginIntro([this.def.name], 0.45);
   }
-  pause() {
+  pause(): void {
     if (this.state !== "playing" && this.state !== "intro")
       return;
     this.ui.hideCard();
     this.setState("paused");
     this.ui.showPause();
   }
-  resume() {
+  resume(): void {
     this.input.requestPointerLock();
     this.ui.hideScreen();
     this.state = this.recorder.frames.length > 0 ? "playing" : "intro";
@@ -210,7 +224,7 @@ export class Game {
       this.beginIntro(["GO."], 0.3);
     this.loop.time.clearAccumulator();
   }
-  toMenu() {
+  toMenu(): void {
     this.ui.hideCard();
     this.replay = null;
     if (document.pointerLockElement)
@@ -219,24 +233,24 @@ export class Game {
     this.setState("title");
     this.ui.showTitle();
   }
-  enterDead() {
+  enterDead(): void {
     this.setState("dead");
     this.flash = [1, 0.25, 0.3, 0.85];
     this.audio.play("death", { ignoreTime: true });
     this.ui.titleCard(["AGAIN."], 0.6);
   }
-  enterCleared() {
+  enterCleared(): void {
     this.setState("cleared");
     this.lastResults = { real: this.runRealTime, sim: this.world.simTime, kills: this.world.stats.kills, shots: this.world.stats.shots };
     this.flash = [1, 1, 1, 0.5];
     this.audio.play("clear", { ignoreTime: true });
     this.ui.titleCard(["CLEAR.", "CLEAR.", "CLEAR."], 0.38, () => this.showResults());
   }
-  showResults() {
+  showResults(): void {
     if (document.pointerLockElement)
       document.exitPointerLock();
     const r = this.lastResults ?? { real: 0, sim: 0, kills: 0, shots: 0 };
-    const rec = this.save.levels[this.def.id] ?? { cleared: false };
+    const rec: LevelRecord = this.save.levels[this.def.id] ?? { cleared: false };
     const newBest = rec.best === void 0 || r.real < rec.best;
     rec.cleared = true;
     if (newBest) {
@@ -257,7 +271,7 @@ export class Game {
       hasNext: this.levelIndex < LEVELS.length - 1
     });
   }
-  startReplay() {
+  startReplay(): void {
     if (!this.shared || this.recorder.frames.length === 0)
       return;
     this.fx.clear();
@@ -266,14 +280,14 @@ export class Game {
     this.setState("replay");
     this.ui.showReplayBar();
   }
-  endReplay() {
+  endReplay(): void {
     if (this.state !== "replay")
       return;
     this.replay = null;
     this.fx.clear();
     this.showResults();
   }
-  applySettings(s) {
+  applySettings(s: Settings): void {
     this.save.settings = s;
     this.ui.setSave(this.save);
     writeSave(this.save);
@@ -284,7 +298,7 @@ export class Game {
     this.autoScale = 1;
     this.gfx.setResolutionScale(s.resolutionScale);
   }
-  frame(t) {
+  frame(t: Time): void {
     const dt = t.realDt;
     const input = this.input;
     input.update(dt);
@@ -360,12 +374,12 @@ export class Game {
         break;
     }
   }
-  fixedStep() {
+  fixedStep(): void {
     if (this.state === "playing" || this.state === "dead" || this.state === "cleared") {
       this.world.step(FIXED_STEP);
     }
   }
-  render(t) {
+  render(t: Time): void {
     if (this.state === "playing")
       this.recorder.setLastSteps(t.stepsThisFrame);
     if (this.state === "playing" && this.world.failed)
@@ -380,8 +394,8 @@ export class Game {
     this.fx.update(visualDt, world.static);
     this.updateAutoResolution(t.realDt);
     const eye = v3();
-    let yaw;
-    let pitch;
+    let yaw: number;
+    let pitch: number;
     if (inReplay && this.replay?.current) {
       const f = this.replay.current;
       eye[0] = f.pos[0];
@@ -396,7 +410,7 @@ export class Game {
       yaw = this.def.player.yaw;
       pitch = 0;
     } else if (this.state === "title" || this.state === "results" && !this.lastResults) {
-      const sc = this.scene;
+      const sc = this.scene!;
       const cx = (sc.min[0] + sc.max[0]) / 2;
       const cz = (sc.min[2] + sc.max[2]) / 2;
       const r = Math.max(4, Math.min(sc.max[0] - sc.min[0], sc.max[2] - sc.min[2]) * 0.32);
@@ -458,7 +472,7 @@ export class Game {
     }
     this.overlay.update(t);
   }
-  drawWorld(world, alpha, ts, realTime) {
+  drawWorld(world: World, alpha: number, ts: number, realTime: number): void {
     const r = this.renderer;
     if (this.scene)
       r.drawMesh(this.scene.mesh, IDENTITY);
@@ -500,7 +514,7 @@ export class Game {
       r.drawSegment(l.origin, end, 4e-3 + k * 8e-3, [0.9 * (1 + k * 6), 0.25 * (1 + k * 3), 1.6 * (1 + k * 6)], 1, 1.2);
     }
   }
-  drawEnemy(e, alpha) {
+  drawEnemy(e: Enemy, alpha: number): void {
     const p = this.pose;
     const pos = lerp(v3(), e.prevPos, e.pos, alpha);
     computePose({
@@ -526,7 +540,7 @@ export class Game {
     if (e.weapon)
       this.renderer.drawMesh(this.meshes.items[e.weapon.kind], p.weapon, WHITE, 0.04, "opaque");
   }
-  incomingThreat(world) {
+  incomingThreat(world: World): number {
     if (this.state !== "playing")
       return 0;
     const eye = world.playerEye(v3());
@@ -543,7 +557,7 @@ export class Game {
     }
     return threat;
   }
-  updatePost(world, ts, realDt) {
+  updatePost(world: World, ts: number, realDt: number): void {
     const s = this.save.settings;
     const p = this.post;
     const reduce = s.reduceMotion;
@@ -570,16 +584,16 @@ export class Game {
     this.threat = approach(this.threat, incoming, incoming > this.threat ? 0.05 : 2.5, realDt);
     p.threat = reduce ? 0 : this.threat;
   }
-  updateHud(world, ts) {
+  updateHud(world: World, ts: number): void {
     const visible = this.state === "playing" || this.state === "intro" || this.state === "cleared";
     const held = world.player.held;
-    let hint = null;
+    let hint: string | null = null;
     if (this.state === "playing" && world.aimProp)
       hint = `E  ${ITEM_NAMES[world.aimProp.item.kind]}`;
     else if (this.state === "playing" && held && isGun(held.kind) && held.ammo === 0)
       hint = "EMPTY — CLICK TO THROW";
     const exit = this.def.exit;
-    const hud = {
+    const hud: HudState = {
       visible,
       timeScale: ts,
       itemName: held ? ITEM_NAMES[held.kind] : null,
@@ -592,13 +606,13 @@ export class Game {
     };
     this.ui.updateHud(hud);
   }
-  handleEvents(world) {
+  handleEvents(world: World): void {
     const a = this.audio;
     const fx = this.fx;
     for (const ev of world.events)
       this.handleEvent(ev, a, fx);
     world.events.length = 0;
-    const now = new Set();
+    const now = new Set<number>();
     for (const e of world.enemies) {
       if (e.telegraph > 0) {
         now.add(e.id);
@@ -608,10 +622,10 @@ export class Game {
     }
     this.telegraphing = now;
   }
-  handleEvent(ev, a, fx) {
+  handleEvent(ev: WorldEvent, a: AudioEngine, fx: FxSystem): void {
     switch (ev.type) {
       case "shot":
-        a.play(ev.byPlayer ? SHOT_SFX[ev.weapon] : "enemyShot", { pos: ev.byPlayer ? void 0 : ev.pos, volume: ev.byPlayer ? 0.8 : 1 });
+        a.play(ev.byPlayer ? SHOT_SFX[ev.weapon as WeaponKind] : "enemyShot", { pos: ev.byPlayer ? void 0 : ev.pos, volume: ev.byPlayer ? 0.8 : 1 });
         fx.muzzleFlash(ev.pos, ev.dir, ev.weapon === "scatter");
         break;
       case "impact":
@@ -690,7 +704,7 @@ export class Game {
         break;
     }
   }
-  updateAutoResolution(realDt) {
+  updateAutoResolution(realDt: number): void {
     const s = this.save.settings;
     if (!s.autoResolution || this.state !== "playing")
       return;
@@ -711,7 +725,7 @@ export class Game {
       this.gfx.setResolutionScale(s.resolutionScale * this.autoScale);
     }
   }
-  get lastDeathDir() {
+  get lastDeathDir(): Vec3 {
     return dirFromYawPitch(v3(), Math.atan2(-this.deathDir[0], -this.deathDir[2]), 0);
   }
 }

@@ -1,34 +1,68 @@
-// @ts-nocheck
 import { ACT_NAMES } from "../levels/index";
-
-const fmtTime = (s) => {
+import type { LevelDef } from "../levels/types";
+import type { BooleanSettingKey, NumericSettingKey, PostQuality, SaveData, Settings } from "../game/save";
+export interface UiHandlers {
+  onPlayLevel(index: number): void;
+  onResume(): void;
+  onRestart(): void;
+  onMenu(): void;
+  onNext(): void;
+  onReplay(): void;
+  onSkipReplay(): void;
+  onSettingsChanged(s: Settings): void;
+  /** Click feedback; also unlocks audio on the first user gesture. */
+  onUiSound(): void;
+}
+export type ScreenName = "none" | "title" | "levels" | "settings" | "pause" | "results" | "replay";
+export interface HudState {
+  visible: boolean;
+  timeScale: number;
+  itemName: string | null;
+  ammo: number;
+  maxAmmo: number;
+  hint: string | null;
+  levelName: string;
+  remaining: number;
+  crosshairScale: number;
+}
+export interface ResultsInfo {
+  level: LevelDef;
+  realTime: number;
+  simTime: number;
+  kills: number;
+  shots: number;
+  best: number | undefined;
+  newBest: boolean;
+  hasNext: boolean;
+}
+const fmtTime = (s: number): string => {
   const m2 = Math.floor(s / 60);
   const sec = s - m2 * 60;
   return `${m2}:${sec.toFixed(2).padStart(5, "0")}`;
 };
 export class Ui {
-  handlers;
-  save;
-  levels;
-  root;
-  screenEl;
-  hudEl;
-  cardEl;
-  crosshair;
-  ammoEl;
-  itemEl;
-  hintEl;
-  infoEl;
-  lockEl;
-  screen = "none";
-  settingsReturn = "title";
+  handlers: UiHandlers;
+  save: SaveData;
+  levels: LevelDef[];
+  root: HTMLDivElement;
+  screenEl: HTMLElement;
+  hudEl: HTMLElement;
+  cardEl: HTMLElement;
+  crosshair: HTMLElement;
+  ammoEl: HTMLElement;
+  itemEl: HTMLElement;
+  hintEl: HTMLElement;
+  infoEl: HTMLElement;
+  lockEl: HTMLElement;
+  screen: ScreenName = "none";
+  settingsReturn: "title" | "pause" = "title";
   cardTimer = 0;
-  cardWords = [];
+  cardWords: string[] = [];
   cardIndex = 0;
   cardWordTime = 0.32;
-  cardOnDone = null;
+  cardOnDone: (() => void) | null = null;
   lastAmmoKey = "";
-  constructor(handlers, save, levels) {
+  constructor(handlers: UiHandlers, save: SaveData, levels: LevelDef[]) {
     this.handlers = handlers;
     this.save = save;
     this.levels = levels;
@@ -47,29 +81,29 @@ export class Ui {
       <div class="card" hidden></div>
       <div class="lock-hint" hidden>CLICK TO CONTINUE</div>
       <div class="screen" hidden></div>`;
-    this.hudEl = root.querySelector(".hud");
-    this.crosshair = root.querySelector(".crosshair");
-    this.ammoEl = root.querySelector(".hud-ammo");
-    this.itemEl = root.querySelector(".hud-item");
-    this.hintEl = root.querySelector(".hud-hint");
-    this.infoEl = root.querySelector(".hud-info");
-    this.cardEl = root.querySelector(".card");
-    this.screenEl = root.querySelector(".screen");
-    this.lockEl = root.querySelector(".lock-hint");
+    this.hudEl = root.querySelector(".hud") as HTMLElement;
+    this.crosshair = root.querySelector(".crosshair") as HTMLElement;
+    this.ammoEl = root.querySelector(".hud-ammo") as HTMLElement;
+    this.itemEl = root.querySelector(".hud-item") as HTMLElement;
+    this.hintEl = root.querySelector(".hud-hint") as HTMLElement;
+    this.infoEl = root.querySelector(".hud-info") as HTMLElement;
+    this.cardEl = root.querySelector(".card") as HTMLElement;
+    this.screenEl = root.querySelector(".screen") as HTMLElement;
+    this.lockEl = root.querySelector(".lock-hint") as HTMLElement;
   }
-  setSave(save) {
+  setSave(save: SaveData): void {
     this.save = save;
   }
-  get currentScreen() {
+  get currentScreen(): ScreenName {
     return this.screen;
   }
-  get blocking() {
+  get blocking(): boolean {
     return this.screen !== "none" && this.screen !== "replay";
   }
-  showLockHint(show) {
+  showLockHint(show: boolean): void {
     this.lockEl.hidden = !show;
   }
-  titleCard(words, wordTime = 0.32, onDone) {
+  titleCard(words: string[], wordTime = 0.32, onDone?: () => void): void {
     this.cardWords = words;
     this.cardIndex = 0;
     this.cardTimer = 0;
@@ -78,15 +112,15 @@ export class Ui {
     this.cardEl.hidden = words.length === 0;
     this.renderCardWord();
   }
-  get cardActive() {
+  get cardActive(): boolean {
     return !this.cardEl.hidden;
   }
-  hideCard() {
+  hideCard(): void {
     this.cardEl.hidden = true;
     this.cardWords = [];
     this.cardOnDone = null;
   }
-  renderCardWord() {
+  renderCardWord(): void {
     const w = this.cardWords[this.cardIndex];
     if (w === void 0)
       return;
@@ -96,7 +130,7 @@ export class Ui {
     void this.cardEl.offsetWidth;
     this.cardEl.classList.add("pop");
   }
-  update(realDt) {
+  update(realDt: number): void {
     if (this.cardEl.hidden || this.cardWords.length === 0)
       return;
     this.cardTimer += realDt;
@@ -114,7 +148,7 @@ export class Ui {
       this.renderCardWord();
     }
   }
-  updateHud(h) {
+  updateHud(h: HudState): void {
     this.hudEl.hidden = !h.visible;
     if (!h.visible)
       return;
@@ -136,12 +170,12 @@ export class Ui {
     this.hintEl.textContent = h.hint ?? "";
     this.infoEl.textContent = `${h.levelName}   ${h.remaining > 0 ? `${h.remaining} LEFT` : ""}`;
   }
-  hideScreen() {
+  hideScreen(): void {
     this.screen = "none";
     this.screenEl.hidden = true;
     this.screenEl.innerHTML = "";
   }
-  showTitle() {
+  showTitle(): void {
     this.screen = "title";
     const next = this.firstUnclearedIndex();
     this.screenEl.hidden = false;
@@ -164,11 +198,11 @@ export class Ui {
       settings: () => this.showSettings("title")
     });
   }
-  showLevels() {
+  showLevels(): void {
     this.screen = "levels";
     this.screenEl.hidden = false;
     this.screenEl.className = "screen levels";
-    const acts = [];
+    const acts: string[] = [];
     for (const act of [1, 2, 3]) {
       const items = this.levels.map((l, i) => ({ l, i })).filter(({ l }) => l.act === act).map(({ l, i }) => {
         const unlocked = this.isUnlocked(i);
@@ -180,7 +214,7 @@ export class Ui {
       acts.push(`<section><h2>ACT ${act} · ${ACT_NAMES[act]}</h2><div class="grid">${items}</div></section>`);
     }
     this.screenEl.innerHTML = `<h1 class="heading">LEVELS</h1>${acts.join("")}<div class="menu"><button data-act="back">BACK</button></div>`;
-    this.screenEl.querySelectorAll("button[data-level]").forEach((b) => {
+    this.screenEl.querySelectorAll<HTMLButtonElement>("button[data-level]").forEach((b) => {
       b.addEventListener("click", () => {
         this.handlers.onUiSound();
         this.handlers.onPlayLevel(Number(b.dataset.level));
@@ -188,15 +222,15 @@ export class Ui {
     });
     this.bind({ back: () => this.showTitle() });
   }
-  showSettings(returnTo) {
+  showSettings(returnTo: "title" | "pause"): void {
     this.settingsReturn = returnTo;
     this.screen = "settings";
     this.screenEl.hidden = false;
     this.screenEl.className = "screen settings";
     const s = this.save.settings;
-    const range = (key, label, min, max, step, fmt) => `<label><span>${label}</span><input type="range" data-key="${key}" min="${min}" max="${max}" step="${step}" value="${s[key]}"><output>${fmt(s[key])}</output></label>`;
-    const check = (key, label) => `<label class="check"><span>${label}</span><input type="checkbox" data-key="${key}" ${s[key] ? "checked" : ""}></label>`;
-    const pct = (v) => `${Math.round(v * 100)}%`;
+    const range = (key: NumericSettingKey, label: string, min: number, max: number, step: number, fmt: (v: number) => string): string => `<label><span>${label}</span><input type="range" data-key="${key}" min="${min}" max="${max}" step="${step}" value="${s[key]}"><output>${fmt(s[key])}</output></label>`;
+    const check = (key: BooleanSettingKey, label: string): string => `<label class="check"><span>${label}</span><input type="checkbox" data-key="${key}" ${s[key] ? "checked" : ""}></label>`;
+    const pct = (v: number): string => `${Math.round(v * 100)}%`;
     this.screenEl.innerHTML = `
       <h1 class="heading">SETTINGS</h1>
       <div class="form">
@@ -217,9 +251,9 @@ export class Ui {
       </div>
       <div class="menu"><button data-act="back">BACK</button></div>`;
     const apply = () => this.handlers.onSettingsChanged({ ...this.save.settings });
-    this.screenEl.querySelectorAll("input[type=range]").forEach((el) => {
+    this.screenEl.querySelectorAll<HTMLInputElement>("input[type=range]").forEach((el) => {
       el.addEventListener("input", () => {
-        const key = el.dataset.key;
+        const key = el.dataset.key as NumericSettingKey;
         const v = Number(el.value);
         this.save.settings[key] = v;
         const out = el.nextElementSibling;
@@ -228,15 +262,15 @@ export class Ui {
         apply();
       });
     });
-    this.screenEl.querySelectorAll("input[type=checkbox]").forEach((el) => {
+    this.screenEl.querySelectorAll<HTMLInputElement>("input[type=checkbox]").forEach((el) => {
       el.addEventListener("change", () => {
-        this.save.settings[el.dataset.key] = el.checked;
+        this.save.settings[el.dataset.key as BooleanSettingKey] = el.checked;
         apply();
       });
     });
     this.screenEl.querySelectorAll("select").forEach((el) => {
       el.addEventListener("change", () => {
-        this.save.settings[el.dataset.key] = el.value;
+        this.save.settings[el.dataset.key as "postQuality"] = el.value as PostQuality;
         apply();
       });
     });
@@ -249,7 +283,7 @@ export class Ui {
       }
     });
   }
-  showPause() {
+  showPause(): void {
     this.screen = "pause";
     this.screenEl.hidden = false;
     this.screenEl.className = "screen pause";
@@ -268,7 +302,7 @@ export class Ui {
       menu: () => this.handlers.onMenu()
     });
   }
-  showResults(r) {
+  showResults(r: ResultsInfo): void {
     this.screen = "results";
     this.screenEl.hidden = false;
     this.screenEl.className = "screen results";
@@ -295,25 +329,25 @@ export class Ui {
       menu: () => this.handlers.onMenu()
     });
   }
-  showReplayBar() {
+  showReplayBar(): void {
     this.screen = "replay";
     this.screenEl.hidden = false;
     this.screenEl.className = "screen replay";
     this.screenEl.innerHTML = `<div class="replay-label">REPLAY <span>REAL TIME</span></div><div class="replay-skip">click or press any key to skip</div><div class="replay-progress"><i></i></div>`;
     this.screenEl.addEventListener("click", this.skipReplay, { once: true });
   }
-  setReplayProgress(p) {
-    const bar = this.screenEl.querySelector(".replay-progress i");
+  setReplayProgress(p: number): void {
+    const bar = this.screenEl.querySelector<HTMLElement>(".replay-progress i");
     if (bar)
       bar.style.width = `${(p * 100).toFixed(1)}%`;
   }
-  skipReplay = () => {
+  skipReplay = (): void => {
     if (this.screen === "replay")
       this.handlers.onSkipReplay();
   };
-  bind(actions) {
-    this.screenEl.querySelectorAll("button[data-act]").forEach((b) => {
-      const fn = actions[b.dataset.act];
+  bind(actions: Partial<Record<string, () => void>>): void {
+    this.screenEl.querySelectorAll<HTMLButtonElement>("button[data-act]").forEach((b) => {
+      const fn = actions[b.dataset.act!];
       if (!fn)
         return;
       b.addEventListener("click", (ev) => {
@@ -323,20 +357,20 @@ export class Ui {
       });
     });
   }
-  isUnlocked(index) {
+  isUnlocked(index: number): boolean {
     if (index < 0)
       return true;
     const prev = this.levels[index - 1];
     return !!prev && !!this.save.levels[prev.id]?.cleared;
   }
-  firstUnclearedIndex() {
+  firstUnclearedIndex(): number {
     for (let i = 0; i < this.levels.length; i++) {
       if (!this.save.levels[this.levels[i].id]?.cleared)
         return i;
     }
     return 0;
   }
-  get rootElement() {
+  get rootElement(): HTMLDivElement {
     return this.root;
   }
 }
