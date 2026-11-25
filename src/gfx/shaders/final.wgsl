@@ -52,9 +52,12 @@ fn fsFinal(fin : FullOut) -> @location(0) vec4f {
   let vig = 1.0 - post.fx.x * smoothstep(0.15, 0.7, radial * 1.6);
   mapped *= vig;
 
+  // Danger warning: a pulsing darkening of the screen edges. It must never hide the centre,
+  // because that is where the incoming bullet the player needs to dodge is drawn.
   let wave = sin(post.camera.z * post.danger.y);
   let threatPulse = smoothstep(0.0, 0.3, abs(wave));
-  mapped *= 1.0 - post.danger.x * threatPulse;
+  let edge = smoothstep(0.15, 0.7, radial * 1.6);
+  mapped *= 1.0 - post.danger.x * threatPulse * edge * 0.4;
 
   let g = grainHash(fin.clipPos.xy + vec2f(post.camera.z * 61.0, post.camera.z * 17.0)) - 0.5;
   mapped += vec3f(g * post.grade.w);

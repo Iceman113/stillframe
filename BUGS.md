@@ -1,8 +1,50 @@
 # Bugs
 
+## Fixed in Part 3
+
+Verified with scripted sessions in headless Chrome. They use the real dev build, real pointer lock and the F4 overlay values, plus screenshots. A manual play-through of levels 1-1 to 1-3 is still to do.
+
+### B1. PLAY does nothing; level 1-1 is locked
+- **Reproduce:** clear `localStorage`, load the game, click PLAY.
+- **Seen:** the title screen stays. In LEVELS, 1-1 shows LOCKED.
+- **Root cause:** `src/ui/ui.ts`, `Ui.isUnlocked`. The guard was `index < 0`, so for index 0 the code read `levels[-1]`, got `undefined` and returned `false`. `Game.startLevel` then returned early.
+- **Fix:** the guard is now `index <= 0`. The first level is always unlocked.
+- **Verified:** PLAY now shows the 1-1 title card, pointer lock engages and the state becomes `playing`. Other levels still unlock only after the previous one is cleared.
+
+### B2. Time never slows down
+- **Reproduce:** enter a level, press F4 and stand still.
+- **Seen:** `timeScale 1.000` whether moving or not. Enemies and bullets move at full speed.
+- **Root cause:** `src/game/game.ts`, `Game.frame` (case `"playing"`). The call `driver.update(dt, WALK_SPEED, planarSpeed, …)` had its two speed arguments swapped against `TimeScaleDriver.update(realDt, planarSpeed, maxSpeed, …)`. That made `moveInput = clamp(4 / speed)`, which is 1 when standing (4/0) and 1 when walking.
+- **Fix:** the arguments are now in the right order.
+- **Verified:** standing still reads `timeScale 0.015`, walking reads `1.000`, and stopping returns to `0.015`.
+- **Revealed:** B3 and B4 only became visible once this was fixed.
+
+### B3. Mouse look is mirrored horizontally
+- **Reproduce:** in 1-1, move the mouse to the right.
+- **Seen:** the view turns left. The enemy straight ahead moves to the right edge of the screen.
+- **When:** horizontal look only. Vertical look and WASD directions are correct.
+- **Root cause:** `src/sim/player-controller.ts`, `PlayerController.look` did `yaw += mouseDx * sensitivity`. In this code yaw grows counter-clockwise (forward = (−sin yaw, −cos yaw), right = (cos yaw, −sin yaw)), so a positive `mouseDx` turned the view left.
+- **Fix:** `yaw -= mouseDx * sensitivity`.
+- **Verified:** after moving the mouse 250 px to the right, the enemy that was straight ahead is now on the left of the screen, so the view turned right. Strafing with A/D still matches the view.
+
+### B4. The screen goes black when an enemy bullet comes close
+- **Reproduce:** in 1-2, step forward in short taps until the first walker fires.
+- **Seen:** the whole frame turns almost black apart from the HUD while the bullet is in flight, which is exactly when you need to see it to dodge. It only happens while an enemy bullet is within about 16 m, or while a marksman is aiming.
+- **Root cause:** `src/gfx/shaders/final.wgsl`, the danger effect `mapped *= 1.0 - post.danger.x * threatPulse`. Two things combined:
+  - It darkens the entire screen by up to 100%.
+  - `threatPulseRate` is 1 rad/s (`defaultPostParams` in `src/gfx/renderer.ts`), so the "pulse" stays near full strength for seconds and reads as a blackout rather than a warning.
+- **Fix:** the darkening is now limited to the screen edges (the same falloff as the vignette) and to 40% at most, and it pulses at 8 rad/s.
+- **Verified:** the same session now shows the walker, its muzzle flash and the corridor while bullets are in flight. Death and clear screens are unchanged.
+
+### Checked and found not to be bugs
+- **A thrown item to the head only stuns at about 5 m.** The throw arcs (gravity 16 m/s²), so it drops about 0.4 m over 5 m and hits the body. Up close, thrown headshots kill.
+- **The "pillar blocks line of fire" scenario failed.** The enemy simply walked around the pillar and shot from the side, which is correct behaviour.
+
 ## Suspected during Parts 1–2 (not fixed yet)
 
 Found while reading and restructuring the code. Per the lab rules, none of these has been changed. Line references are to the current `src/` files. Each entry gets full reproduction steps, root cause, fix and verification in Part 3.
+
+Items 1 and 2 are fixed (B1, B2 above).
 
 1. **Level 1-1 can't be started on a fresh save.**
    - Where: `src/ui/ui.ts`, `Ui.isUnlocked`.

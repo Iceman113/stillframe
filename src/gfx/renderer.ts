@@ -71,7 +71,8 @@ export function defaultPostParams() {
     outline: 1,
     flash: [1, 1, 1, 0] as number[],
     threat: 0,
-    threatPulseRate: 1
+    // rad/s of sin(): 8 gives a visible ~2.5 Hz pulse (1 was so slow it read as a solid blackout).
+    threatPulseRate: 8
   };
 }
 export class Renderer {

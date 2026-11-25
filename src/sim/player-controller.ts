@@ -35,7 +35,8 @@ export class PlayerController {
   look(input: Input, dt: number, s: LookSettings): void {
     this.mouseDx = input.mouseDx;
     this.mouseDy = input.mouseDy;
-    this.yaw += input.mouseDx * s.sensitivity;
+    // Yaw grows counter-clockwise (forward = -sin, -cos), so moving the mouse right must decrease it.
+    this.yaw -= input.mouseDx * s.sensitivity;
     this.pitch -= input.mouseDy * s.sensitivity * (s.invertY ? -1 : 1);
     this.pitch = clamp(this.pitch, -MAX_PITCH, MAX_PITCH);
     this.yaw %= Math.PI * 2;
