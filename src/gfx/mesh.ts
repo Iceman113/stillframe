@@ -1,7 +1,6 @@
-// @ts-nocheck
 export const VERTEX_FLOATS = 10;
 const VERTEX_STRIDE = VERTEX_FLOATS * 4;
-export const STATIC_VERTEX_LAYOUT = {
+export const STATIC_VERTEX_LAYOUT: GPUVertexBufferLayout = {
   arrayStride: VERTEX_STRIDE,
   attributes: [
     { shaderLocation: 0, offset: 0, format: "float32x3" },
@@ -12,20 +11,20 @@ export const STATIC_VERTEX_LAYOUT = {
 let nextMeshId = 1;
 export class Mesh {
   id = nextMeshId++;
-  vertexBuffer;
-  indexBuffer;
-  indexCount;
-  constructor(device, vertices, indices, label = "mesh") {
+  vertexBuffer: GPUBuffer;
+  indexBuffer: GPUBuffer;
+  indexCount: number;
+  constructor(device: GPUDevice, vertices: Float32Array, indices: Uint32Array, label = "mesh") {
     this.indexCount = indices.length;
     this.vertexBuffer = createBufferWithData(device, vertices, GPUBufferUsage.VERTEX, `${label}-vb`);
     this.indexBuffer = createBufferWithData(device, indices, GPUBufferUsage.INDEX, `${label}-ib`);
   }
-  destroy() {
+  destroy(): void {
     this.vertexBuffer.destroy();
     this.indexBuffer.destroy();
   }
 }
-function createBufferWithData(device, data, usage, label) {
+function createBufferWithData(device: GPUDevice, data: Float32Array | Uint32Array, usage: GPUBufferUsageFlags, label: string): GPUBuffer {
   const buffer = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage, mappedAtCreation: true });
   const Ctor = data instanceof Float32Array ? Float32Array : Uint32Array;
   new Ctor(buffer.getMappedRange()).set(data);

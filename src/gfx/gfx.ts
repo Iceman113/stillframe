@@ -1,25 +1,24 @@
-// @ts-nocheck
 export class UnsupportedError extends Error {
 }
 export class Gfx {
-  device;
-  context;
-  canvas;
-  format;
+  device: GPUDevice;
+  context: GPUCanvasContext;
+  canvas: HTMLCanvasElement;
+  format: GPUTextureFormat;
   width = 0;
   height = 0;
   resolutionScale = 1;
   cssPixelWidth = 1;
   cssPixelHeight = 1;
-  resizeListeners = [];
-  observer = null;
-  constructor(canvas, device, context, format) {
+  resizeListeners: ((width: number, height: number) => void)[] = [];
+  observer: ResizeObserver | null = null;
+  constructor(canvas: HTMLCanvasElement, device: GPUDevice, context: GPUCanvasContext, format: GPUTextureFormat) {
     this.canvas = canvas;
     this.device = device;
     this.context = context;
     this.format = format;
   }
-  static async create(canvas, onDeviceLost) {
+  static async create(canvas: HTMLCanvasElement, onDeviceLost: (info: GPUDeviceLostInfo) => void): Promise<Gfx> {
     if (!("gpu" in navigator) || !navigator.gpu) {
       throw new UnsupportedError("navigator.gpu is not available.");
     }
@@ -32,7 +31,7 @@ export class Gfx {
       console.error(`[gfx] device lost (${info2.reason}): ${info2.message}`);
       onDeviceLost(info2);
     });
-    device.addEventListener("uncapturederror", (ev) => {
+    device.addEventListener("uncapturederror", (ev: GPUUncapturedErrorEvent) => {
       console.error("[gfx] uncaptured WebGPU error:", ev.error.message);
     });
     const context = canvas.getContext("webgpu");
@@ -51,34 +50,34 @@ export class Gfx {
     console.info(`[gfx] adapter: ${info.vendor} ${info.architecture} ${info.description}, format: ${format}`);
     return gfx;
   }
-  onResize(listener) {
+  onResize(listener: (width: number, height: number) => void): void {
     this.resizeListeners.push(listener);
   }
-  setResolutionScale(scale2) {
+  setResolutionScale(scale2: number): void {
     const clamped = Math.min(1, Math.max(0.25, scale2));
     if (clamped === this.resolutionScale)
       return;
     this.resolutionScale = clamped;
     this.applySize();
   }
-  getResolutionScale() {
+  getResolutionScale(): number {
     return this.resolutionScale;
   }
-  get aspect() {
+  get aspect(): number {
     return this.width / Math.max(1, this.height);
   }
-  destroy() {
+  destroy(): void {
     this.observer?.disconnect();
     this.device.destroy();
   }
-  configure() {
+  configure(): void {
     this.context.configure({
       device: this.device,
       format: this.format,
       alphaMode: "opaque"
     });
   }
-  observeResize() {
+  observeResize(): void {
     this.observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry)
@@ -101,7 +100,7 @@ export class Gfx {
       this.observer.observe(this.canvas, { box: "content-box" });
     }
   }
-  applySize() {
+  applySize(): void {
     const maxDim = this.device.limits.maxTextureDimension2D;
     const w = Math.max(1, Math.min(maxDim, Math.round(this.cssPixelWidth * this.resolutionScale)));
     const h = Math.max(1, Math.min(maxDim, Math.round(this.cssPixelHeight * this.resolutionScale)));

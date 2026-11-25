@@ -1,14 +1,16 @@
-// @ts-nocheck
 import { Mesh, VERTEX_FLOATS } from "./mesh";
+import type { Vec3 } from "../engine/math";
+/** Linear RGB, each channel 0..1 (only the first three entries are used for vertex colour). */
+export type Rgb = readonly number[];
 
-export function srgbHex(hex) {
-  const toLinear = (c) => {
+export function srgbHex(hex: number): number[] {
+  const toLinear = (c: number): number => {
     const s = c / 255;
     return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
   };
   return [toLinear(hex >> 16 & 255), toLinear(hex >> 8 & 255), toLinear(hex & 255)];
 }
-const BOX_FACES = [
+const BOX_FACES: number[][][] = [
   [[1, 0, 0], [0, 0, -1], [0, 1, 0]],
   [[-1, 0, 0], [0, 0, 1], [0, 1, 0]],
   [[0, 1, 0], [1, 0, 0], [0, 0, -1]],
@@ -16,25 +18,25 @@ const BOX_FACES = [
   [[0, 0, 1], [1, 0, 0], [0, 1, 0]],
   [[0, 0, -1], [-1, 0, 0], [0, 1, 0]]
 ];
-const CORNER_SIGNS = [
+const CORNER_SIGNS: number[][] = [
   [-1, -1],
   [1, -1],
   [1, 1],
   [-1, 1]
 ];
 export class MeshBuilder {
-  vertices = [];
-  indices = [];
-  get vertexCount() {
+  vertices: number[] = [];
+  indices: number[] = [];
+  get vertexCount(): number {
     return this.vertices.length / VERTEX_FLOATS;
   }
-  get isEmpty() {
+  get isEmpty(): boolean {
     return this.indices.length === 0;
   }
-  pushVertex(p, n, c, emissive) {
+  pushVertex(p: Vec3, n: Vec3, c: Rgb, emissive: number): void {
     this.vertices.push(p[0], p[1], p[2], n[0], n[1], n[2], c[0], c[1], c[2], emissive);
   }
-  addTri(a, b, c, color, emissive = 0) {
+  addTri(a: Vec3, b: Vec3, c: Vec3, color: Rgb, emissive = 0): this {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
     const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     let nx = uy * vz - uz * vy;
@@ -44,7 +46,7 @@ export class MeshBuilder {
     nx /= l;
     ny /= l;
     nz /= l;
-    const n = [nx, ny, nz];
+    const n: Vec3 = [nx, ny, nz];
     const base = this.vertexCount;
     this.pushVertex(a, n, color, emissive);
     this.pushVertex(b, n, color, emissive);
@@ -52,17 +54,17 @@ export class MeshBuilder {
     this.indices.push(base, base + 1, base + 2);
     return this;
   }
-  addQuad(a, b, c, d, color, emissive = 0) {
+  addQuad(a: Vec3, b: Vec3, c: Vec3, d: Vec3, color: Rgb, emissive = 0): this {
     this.addTri(a, b, c, color, emissive);
     this.addTri(a, c, d, color, emissive);
     return this;
   }
-  addBox(center, size, color, emissive = 0) {
+  addBox(center: Vec3, size: Vec3, color: Rgb, emissive = 0): this {
     const half = [size[0] / 2, size[1] / 2, size[2] / 2];
     for (const [n, u, v] of BOX_FACES) {
       const base = this.vertexCount;
       for (const [su, sv] of CORNER_SIGNS) {
-        const p = [
+        const p: Vec3 = [
           center[0] + half[0] * (n[0] + su * u[0] + sv * v[0]),
           center[1] + half[1] * (n[1] + su * u[1] + sv * v[1]),
           center[2] + half[2] * (n[2] + su * u[2] + sv * v[2])
@@ -73,24 +75,24 @@ export class MeshBuilder {
     }
     return this;
   }
-  addBoxMinMax(min, max, color, emissive = 0) {
+  addBoxMinMax(min: Vec3, max: Vec3, color: Rgb, emissive = 0): this {
     return this.addBox([(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2], [max[0] - min[0], max[1] - min[1], max[2] - min[2]], color, emissive);
   }
-  addTaperedBox(cx, cz, y0, y1, bw, bd, tw, td, color, emissive = 0) {
+  addTaperedBox(cx: number, cz: number, y0: number, y1: number, bw: number, bd: number, tw: number, td: number, color: Rgb, emissive = 0): this {
     const b = [
       [cx - bw / 2, y0, cz + bd / 2],
       [cx + bw / 2, y0, cz + bd / 2],
       [cx + bw / 2, y0, cz - bd / 2],
       [cx - bw / 2, y0, cz - bd / 2]
     ];
-    const t = [
+    const t: Vec3[] = [
       [cx - tw / 2, y1, cz + td / 2],
       [cx + tw / 2, y1, cz + td / 2],
       [cx + tw / 2, y1, cz - td / 2],
       [cx - tw / 2, y1, cz - td / 2]
     ];
     const flip = y1 < y0;
-    const quad = (p0, p1, p2, p3) => {
+    const quad = (p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3): void => {
       if (flip)
         this.addQuad(p3, p2, p1, p0, color, emissive);
       else
@@ -104,7 +106,7 @@ export class MeshBuilder {
     quad(b[3], b[0], t[0], t[3]);
     return this;
   }
-  build(device, label) {
+  build(device: GPUDevice, label?: string): Mesh {
     return new Mesh(device, new Float32Array(this.vertices), new Uint32Array(this.indices), label);
   }
 }

@@ -1,6 +1,10 @@
-// @ts-nocheck
 import { mat4 } from "wgpu-matrix";
 import { STATIC_VERTEX_LAYOUT } from "./mesh";
+import type { Mesh } from "./mesh";
+import type { Camera } from "./camera";
+import type { Gfx } from "./gfx";
+import type { Vec3 } from "../engine/math";
+import type { Rgb } from "./mesh-builder";
 import bloomWgsl from "./shaders/bloom.wgsl?raw";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import finalWgsl from "./shaders/final.wgsl?raw";
@@ -11,8 +15,8 @@ import postWgsl from "./shaders/post.wgsl?raw";
 import sceneWgsl from "./shaders/scene.wgsl?raw";
 import shadowWgsl from "./shaders/shadow.wgsl?raw";
 
-const HDR_FORMAT = "rgba16float";
-const DEPTH_FORMAT = "depth32float";
+const HDR_FORMAT: GPUTextureFormat = "rgba16float";
+const DEPTH_FORMAT: GPUTextureFormat = "depth32float";
 const SHADOW_SIZE = 2048;
 const FRAME_FLOATS = 80;
 const FX_FRAME_FLOATS = 28;
@@ -22,7 +26,38 @@ const SEGMENT_FLOATS = 12;
 const MAX_INSTANCES = 8192;
 const MAX_SEGMENTS = 8192;
 const BLOOM_LEVELS = 5;
-const LAYERS = ["opaque", "glass", "viewmodel"];
+/** Instance buckets, drawn by different passes: opaque scene, refractive enemy glass, first-person hands. */
+export type RenderLayer = "opaque" | "glass" | "viewmodel";
+export type RenderQuality = "low" | "medium" | "high";
+export type PostParams = ReturnType<typeof defaultPostParams>;
+interface Bucket {
+  mesh: Mesh;
+  data: Float32Array;
+  count: number;
+}
+interface Batch {
+  mesh: Mesh;
+  first: number;
+  count: number;
+}
+interface RenderTargets {
+  hdr: GPUTexture;
+  hdrCopy: GPUTexture;
+  normal: GPUTexture;
+  depth: GPUTexture;
+  comp: GPUTexture;
+  bloom: GPUTexture;
+  bloomViews: GPUTextureView[];
+  glassBG: GPUBindGroup;
+  outlineBG: GPUBindGroup;
+  finalBG: GPUBindGroup;
+  prefilterBG: GPUBindGroup;
+  downBGs: GPUBindGroup[];
+  upBGs: GPUBindGroup[];
+  width: number;
+  height: number;
+}
+const LAYERS: RenderLayer[] = ["opaque", "glass", "viewmodel"];
 export function defaultPostParams() {
   return {
     freeze: 0,
@@ -34,13 +69,13 @@ export function defaultPostParams() {
     bloomThreshold: 1,
     exposure: 1,
     outline: 1,
-    flash: [1, 1, 1, 0],
+    flash: [1, 1, 1, 0] as number[],
     threat: 0,
     threatPulseRate: 1
   };
 }
 export class Renderer {
-  gfx;
+  gfx: Gfx;
   lighting = {
     keyDir: [0.45, 0.8, 0.35],
     keyColor: [1.6, 0.95, 0.55],
@@ -51,56 +86,56 @@ export class Renderer {
     fogColor: [0.035, 0.04, 0.045],
     fogDensity: 0.02
   };
-  quality = "high";
+  quality: RenderQuality = "high";
   lastDrawCalls = 0;
   lastInstances = 0;
   lastSegments = 0;
-  device;
-  linearSampler;
-  shadowSampler;
-  scenePipeline;
-  shadowPipeline;
-  glassPipeline;
-  fxPipeline;
-  outlinePipeline;
-  prefilterPipeline;
-  downPipeline;
-  upPipeline;
-  finalPipeline;
-  glassLayout;
-  bloomLayout;
-  frameWorldBuf;
-  frameVmBuf;
-  fxFrameBuf;
-  postBuf;
-  instanceBuf;
-  segmentBuf;
-  sceneWorldBG;
-  sceneVmBG;
-  shadowBG;
-  instanceBG;
-  fxBG;
-  shadowTex;
-  shadowView;
-  targets = null;
+  device: GPUDevice;
+  linearSampler: GPUSampler;
+  shadowSampler: GPUSampler;
+  scenePipeline: GPURenderPipeline;
+  shadowPipeline: GPURenderPipeline;
+  glassPipeline: GPURenderPipeline;
+  fxPipeline: GPURenderPipeline;
+  outlinePipeline: GPURenderPipeline;
+  prefilterPipeline: GPURenderPipeline;
+  downPipeline: GPURenderPipeline;
+  upPipeline: GPURenderPipeline;
+  finalPipeline: GPURenderPipeline;
+  glassLayout: GPUBindGroupLayout;
+  bloomLayout: GPUBindGroupLayout;
+  frameWorldBuf: GPUBuffer;
+  frameVmBuf: GPUBuffer;
+  fxFrameBuf: GPUBuffer;
+  postBuf: GPUBuffer;
+  instanceBuf: GPUBuffer;
+  segmentBuf: GPUBuffer;
+  sceneWorldBG: GPUBindGroup;
+  sceneVmBG: GPUBindGroup;
+  shadowBG: GPUBindGroup;
+  instanceBG: GPUBindGroup;
+  fxBG: GPUBindGroup;
+  shadowTex: GPUTexture;
+  shadowView: GPUTextureView;
+  targets: RenderTargets | null = null;
   frameData = new Float32Array(FRAME_FLOATS);
   fxFrameData = new Float32Array(FX_FRAME_FLOATS);
   postData = new Float32Array(POST_FLOATS);
   instanceStaging = new Float32Array(MAX_INSTANCES * INSTANCE_FLOATS);
   segmentStaging = new Float32Array(MAX_SEGMENTS * SEGMENT_FLOATS);
   segmentCount = 0;
-  buckets = {
+  buckets: Record<RenderLayer, Map<Mesh, Bucket>> = {
     opaque: new Map(),
     glass: new Map(),
     viewmodel: new Map()
   };
-  batches = { opaque: [], glass: [], viewmodel: [] };
+  batches: Record<RenderLayer, Batch[]> = { opaque: [], glass: [], viewmodel: [] };
   lightView = mat4.create();
   lightProj = mat4.create();
   lightViewProj = mat4.create();
   warnedInstances = false;
   warnedSegments = false;
-  constructor(gfx) {
+  constructor(gfx: Gfx) {
     this.gfx = gfx;
     const device = gfx.device;
     this.device = device;
@@ -119,7 +154,7 @@ export class Renderer {
       addressModeU: "clamp-to-edge",
       addressModeV: "clamp-to-edge"
     });
-    const uniformBuf = (label, floats) => device.createBuffer({ label, size: floats * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const uniformBuf = (label: string, floats: number): GPUBuffer => device.createBuffer({ label, size: floats * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.frameWorldBuf = uniformBuf("frame-world", FRAME_FLOATS);
     this.frameVmBuf = uniformBuf("frame-viewmodel", FRAME_FLOATS);
     this.fxFrameBuf = uniformBuf("fx-frame", FX_FRAME_FLOATS);
@@ -188,8 +223,8 @@ export class Renderer {
     const outlineModule = this.module("outline.wgsl", postWgsl + outlineWgsl);
     const bloomModule = this.module("bloom.wgsl", postWgsl + bloomWgsl);
     const finalModule = this.module("final.wgsl", postWgsl + finalWgsl);
-    const sceneTargets = [{ format: HDR_FORMAT }, { format: HDR_FORMAT }];
-    const depthWrite = { format: DEPTH_FORMAT, depthWriteEnabled: true, depthCompare: "less" };
+    const sceneTargets: GPUColorTargetState[] = [{ format: HDR_FORMAT }, { format: HDR_FORMAT }];
+    const depthWrite: GPUDepthStencilState = { format: DEPTH_FORMAT, depthWriteEnabled: true, depthCompare: "less" };
     this.scenePipeline = device.createRenderPipeline({
       label: "scene",
       layout: device.createPipelineLayout({ bindGroupLayouts: [sceneLayout, instanceLayout] }),
@@ -233,7 +268,7 @@ export class Renderer {
       primitive: { topology: "triangle-list", cullMode: "none" },
       depthStencil: { format: DEPTH_FORMAT, depthWriteEnabled: false, depthCompare: "less" }
     });
-    const fullscreen = (label, module, entryPoint, format, layout, blend) => device.createRenderPipeline({
+    const fullscreen = (label: string, module: GPUShaderModule, entryPoint: string, format: GPUTextureFormat, layout: GPUPipelineLayout | "auto", blend?: GPUBlendState): GPURenderPipeline => device.createRenderPipeline({
       label,
       layout,
       vertex: { module, entryPoint: "vsFull" },
@@ -287,7 +322,7 @@ export class Renderer {
     });
     this.setShadowBounds([-20, -1, -20], [20, 6, 20]);
   }
-  setShadowBounds(min, max) {
+  setShadowBounds(min: Vec3, max: Vec3): void {
     const c = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
     const r = Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2 + 1;
     const kd = this.lighting.keyDir;
@@ -298,7 +333,7 @@ export class Renderer {
     mat4.ortho(-r, r, -r, r, 0.1, r * 4, this.lightProj);
     mat4.multiply(this.lightProj, this.lightView, this.lightViewProj);
   }
-  drawMesh(mesh, model, color = WHITE, emissive = 0, layer = "opaque", flash = 0, extraY = 1, highlight = 0) {
+  drawMesh(mesh: Mesh, model: Float32Array | number[], color: Rgb = WHITE, emissive = 0, layer: RenderLayer = "opaque", flash = 0, extraY = 1, highlight = 0): void {
     const layerBuckets = this.buckets[layer];
     let bucket = layerBuckets.get(mesh);
     if (!bucket) {
@@ -323,7 +358,7 @@ export class Renderer {
     d[o + 23] = 0;
     bucket.count++;
   }
-  drawSegment(p0, p1, width, color, tailBright = 1, softness = 1.5) {
+  drawSegment(p0: Vec3, p1: Vec3, width: number, color: Rgb, tailBright = 1, softness = 1.5): void {
     if (this.segmentCount >= MAX_SEGMENTS) {
       if (!this.warnedSegments)
         console.warn("[gfx] MAX_SEGMENTS exceeded");
@@ -346,13 +381,13 @@ export class Renderer {
     d[o + 11] = softness;
     this.segmentCount++;
   }
-  clearQueue() {
+  clearQueue(): void {
     for (const layer of LAYERS)
       for (const b of this.buckets[layer].values())
         b.count = 0;
     this.segmentCount = 0;
   }
-  render(camera, vmCamera, post, time) {
+  render(camera: Camera, vmCamera: Camera, post: PostParams, time: number): void {
     const device = this.device;
     const colorTexture = this.gfx.context.getCurrentTexture();
     const t = this.ensureTargets(colorTexture.width, colorTexture.height);
@@ -489,7 +524,7 @@ export class Renderer {
       for (const b of this.buckets[layer].values())
         b.count = 0;
   }
-  module(label, code) {
+  module(label: string, code: string): GPUShaderModule {
     const m2 = this.device.createShaderModule({ label, code });
     m2.getCompilationInfo().then((info) => {
       for (const msg of info.messages) {
@@ -499,7 +534,7 @@ export class Renderer {
     });
     return m2;
   }
-  fullscreenPass(encoder, label, view, pipeline, bindGroup, loadOp) {
+  fullscreenPass(encoder: GPUCommandEncoder, label: string, view: GPUTextureView, pipeline: GPURenderPipeline, bindGroup: GPUBindGroup, loadOp: GPULoadOp): void {
     const pass = encoder.beginRenderPass({
       label,
       colorAttachments: [{ view, loadOp, clearValue: { r: 0, g: 0, b: 0, a: 1 }, storeOp: "store" }]
@@ -509,7 +544,7 @@ export class Renderer {
     pass.draw(3);
     pass.end();
   }
-  drawBatches(pass, batches) {
+  drawBatches(pass: GPURenderPassEncoder, batches: Batch[]): number {
     for (const b of batches) {
       pass.setVertexBuffer(0, b.mesh.vertexBuffer);
       pass.setIndexBuffer(b.mesh.indexBuffer, "uint32");
@@ -517,7 +552,7 @@ export class Renderer {
     }
     return batches.length;
   }
-  packInstances() {
+  packInstances(): void {
     let cursor = 0;
     for (const layer of LAYERS) {
       const list = this.batches[layer];
@@ -544,13 +579,13 @@ export class Renderer {
       this.device.queue.writeBuffer(this.instanceBuf, 0, this.instanceStaging.buffer, 0, cursor * INSTANCE_FLOATS * 4);
     }
   }
-  writeFrame(buf, cam, t, shadowsOn, mask, freeze, time) {
+  writeFrame(buf: GPUBuffer, cam: Camera, t: RenderTargets, shadowsOn: boolean, mask: number, freeze: number, time: number): void {
     const d = this.frameData;
     const l = this.lighting;
     const v = cam.view;
     d.set(cam.viewProj, 0);
     d.set(this.lightViewProj, 16);
-    const put = (o, x, y, z, w) => {
+    const put = (o: number, x: number, y: number, z: number, w: number): void => {
       d[o] = x;
       d[o + 1] = y;
       d[o + 2] = z;
@@ -570,7 +605,7 @@ export class Renderer {
     put(76, shadowsOn ? 1 : 0, mask, 1 / SHADOW_SIZE, freeze);
     this.device.queue.writeBuffer(buf, 0, d);
   }
-  writeFxFrame(cam) {
+  writeFxFrame(cam: Camera): void {
     const d = this.fxFrameData;
     const v = cam.view;
     d.set(cam.viewProj, 0);
@@ -588,7 +623,7 @@ export class Renderer {
     d[27] = 0;
     this.device.queue.writeBuffer(this.fxFrameBuf, 0, d);
   }
-  writePost(cam, t, p, time, bloomOn) {
+  writePost(cam: Camera, t: RenderTargets, p: PostParams, time: number, bloomOn: boolean): void {
     const d = this.postData;
     d[0] = t.width;
     d[1] = t.height;
@@ -616,7 +651,7 @@ export class Renderer {
     d[23] = 0;
     this.device.queue.writeBuffer(this.postBuf, 0, d);
   }
-  ensureTargets(width, height) {
+  ensureTargets(width: number, height: number): RenderTargets {
     const cur = this.targets;
     if (cur && cur.width === width && cur.height === height)
       return cur;
@@ -630,7 +665,7 @@ export class Renderer {
     }
     const device = this.device;
     const RT = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING;
-    const tex = (label, format, usage, w = width, h = height, mips = 1) => device.createTexture({ label, size: [w, h], format, usage, mipLevelCount: mips });
+    const tex = (label: string, format: GPUTextureFormat, usage: GPUTextureUsageFlags, w = width, h = height, mips = 1): GPUTexture => device.createTexture({ label, size: [w, h], format, usage, mipLevelCount: mips });
     const hdr = tex("hdr", HDR_FORMAT, RT | GPUTextureUsage.COPY_SRC);
     const hdrCopy = tex("hdr-copy", HDR_FORMAT, GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST);
     const normal = tex("normal-mask", HDR_FORMAT, RT);
@@ -641,7 +676,7 @@ export class Renderer {
     const maxLevels = Math.max(1, Math.floor(Math.log2(Math.min(bw, bh))) - 1);
     const levels = Math.min(BLOOM_LEVELS, maxLevels);
     const bloom = tex("bloom", HDR_FORMAT, RT, bw, bh, levels);
-    const bloomViews = [];
+    const bloomViews: GPUTextureView[] = [];
     for (let i = 0; i < levels; i++)
       bloomViews.push(bloom.createView({ baseMipLevel: i, mipLevelCount: 1 }));
     const glassBG = device.createBindGroup({
@@ -663,7 +698,7 @@ export class Renderer {
         { binding: 3, resource: depth.createView() }
       ]
     });
-    const bloomBG = (label, view) => device.createBindGroup({
+    const bloomBG = (label: string, view: GPUTextureView): GPUBindGroup => device.createBindGroup({
       label,
       layout: this.bloomLayout,
       entries: [
@@ -673,8 +708,8 @@ export class Renderer {
       ]
     });
     const prefilterBG = bloomBG("bloom-prefilter-bg", comp.createView());
-    const downBGs = [];
-    const upBGs = [];
+    const downBGs: GPUBindGroup[] = [];
+    const upBGs: GPUBindGroup[] = [];
     for (let i = 0; i < levels - 1; i++) {
       downBGs.push(bloomBG(`bloom-down-bg-${i}`, bloomViews[i]));
       upBGs.push(bloomBG(`bloom-up-bg-${i}`, bloomViews[i + 1]));
@@ -710,4 +745,4 @@ export class Renderer {
     return this.targets;
   }
 }
-const WHITE = [1, 1, 1];
+const WHITE: Rgb = [1, 1, 1];
