@@ -1,15 +1,18 @@
-// @ts-nocheck
 import { level } from "./level-builder";
+import type { LevelBuilder } from "./level-builder";
+import type { DoorSide } from "./types";
+/** Gap in a roof's edge railing: [side, from, to] along that side. */
+export type RoofGap = [side: DoorSide, a0: number, a1: number];
 
-function roof(b, x0, z0, x1, z1, gaps = []) {
+function roof(b: LevelBuilder, x0: number, z0: number, x1: number, z1: number, gaps: RoofGap[] = []): void {
   b.floor(x0, z0, x1, z1, 0, "floor");
   b.box(x0, -6, z0, x1, -0.4, z1, "wall");
   const h = 1;
   const t = 0.3;
-  const along = (side, a0, a1) => {
+  const along = (side: DoorSide, a0: number, a1: number): void => {
     const g = gaps.filter((q) => q[0] === side).map((q) => [q[1], q[2]]).sort((p, q) => p[0] - q[0]);
     let cur = a0;
-    const seg = (a, c) => {
+    const seg = (a: number, c: number): void => {
       if (c - a < 0.05)
         return;
       if (side === "n")
@@ -32,11 +35,11 @@ function roof(b, x0, z0, x1, z1, gaps = []) {
   along("w", z0 + t, z1 - t);
   along("e", z0 + t, z1 - t);
 }
-function acUnit(b, x, z, w = 2, d = 1.4) {
+function acUnit(b: LevelBuilder, x: number, z: number, w = 2, d = 1.4): void {
   b.crate(x, z, w, 1.5, d, 0, "metal");
   b.crate(x, z, w * 0.6, 0.12, d * 0.6, 1.5, "dark");
 }
-function skyline(b, cx, cz, r) {
+function skyline(b: LevelBuilder, cx: number, cz: number, r: number): void {
   const n = 14;
   for (let i = 0; i < n; i++) {
     const a = i / n * Math.PI * 2 + 0.3;

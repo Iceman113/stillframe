@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { level } from "./level-builder";
 
 const lobby = level({

@@ -1,8 +1,29 @@
-// @ts-nocheck
 import { srgbHex } from "../gfx/mesh-builder";
+import type { Vec3 } from "../sim/types";
+import type { MaterialName, ThemeName } from "./types";
+/** Scene lighting of a theme (consumed by Renderer.lighting). Colours are linear RGB. */
+export interface Lighting {
+  keyDir: Vec3;
+  keyColor: Vec3;
+  fillDir: Vec3;
+  fillColor: Vec3;
+  ambientSky: Vec3;
+  ambientGround: Vec3;
+  fogColor: Vec3;
+  fogDensity: number;
+}
+/** Vertex colour (linear RGB) and emissive strength of a level material. */
+export interface MaterialParams {
+  color: Vec3;
+  emissive: number;
+}
+export interface Theme {
+  lighting: Lighting;
+  materials: Record<MaterialName, MaterialParams>;
+}
 
-const m = (hex, emissive = 0) => ({ color: srgbHex(hex), emissive });
-export const THEMES = {
+const m = (hex: number, emissive = 0): MaterialParams => ({ color: srgbHex(hex), emissive });
+export const THEMES: Record<ThemeName, Theme> = {
   transit: {
     lighting: {
       keyDir: [0.35, 0.85, 0.4],
