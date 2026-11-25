@@ -1,18 +1,36 @@
-// @ts-nocheck
+import type { Aabb, Vec3 } from "./types";
+
+export interface RayHit {
+  t: number;
+  normal: Vec3;
+  point: Vec3;
+  /** Index into StaticWorld.boxes. */
+  box: number;
+}
+export interface MoveResult {
+  grounded: boolean;
+  hitWall: boolean;
+  hitCeiling: boolean;
+}
+export interface SphereResult {
+  grounded: boolean;
+  impact: number;
+  normal: Vec3;
+}
 const CELL = 2;
 const EPS = 1e-4;
 export class StaticWorld {
-  boxes;
-  bounds;
-  cells = new Map();
-  stamps;
+  boxes: Aabb[];
+  bounds: Aabb;
+  cells = new Map<number, number[]>();
+  stamps: Uint32Array;
   stampId = 0;
-  scratch = [];
-  constructor(boxes) {
+  scratch: number[] = [];
+  constructor(boxes: Aabb[]) {
     this.boxes = boxes;
     this.stamps = new Uint32Array(Math.max(1, boxes.length));
-    const min = [Infinity, Infinity, Infinity];
-    const max = [-Infinity, -Infinity, -Infinity];
+    const min: Vec3 = [Infinity, Infinity, Infinity];
+    const max: Vec3 = [-Infinity, -Infinity, -Infinity];
     boxes.forEach((b, i) => {
       for (let k = 0; k < 3; k++) {
         min[k] = Math.min(min[k], b.min[k]);
@@ -36,7 +54,7 @@ export class StaticWorld {
     }
     this.bounds = { min, max };
   }
-  query(minX, minZ, maxX, maxZ, out) {
+  query(minX: number, minZ: number, maxX: number, maxZ: number, out: number[]): number[] {
     out.length = 0;
     this.stampId = this.stampId + 1 >>> 0;
     if (this.stampId === 0) {
@@ -60,7 +78,7 @@ export class StaticWorld {
     }
     return out;
   }
-  raycast(origin, dir, maxDist) {
+  raycast(origin: Vec3, dir: Vec3, maxDist: number): RayHit | null {
     const ex = origin[0] + dir[0] * maxDist;
     const ez = origin[2] + dir[2] * maxDist;
     const cand = this.query(Math.min(origin[0], ex), Math.min(origin[2], ez), Math.max(origin[0], ex), Math.max(origin[2], ez), this.scratch);
@@ -80,7 +98,7 @@ export class StaticWorld {
     }
     if (bestBox < 0)
       return null;
-    const normal = [0, 0, 0];
+    const normal: Vec3 = [0, 0, 0];
     normal[bestAxis] = bestSign;
     return {
       t: best,
@@ -89,14 +107,14 @@ export class StaticWorld {
       box: bestBox
     };
   }
-  lineClear(a, b) {
+  lineClear(a: Vec3, b: Vec3): boolean {
     const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
     const l = Math.hypot(dx, dy, dz);
     if (l < 1e-6)
       return true;
     return this.raycast(a, [dx / l, dy / l, dz / l], l) === null;
   }
-  overlapsAabb(min, max) {
+  overlapsAabb(min: Vec3, max: Vec3): boolean {
     const cand = this.query(min[0], min[2], max[0], max[2], this.scratch);
     for (const i of cand) {
       const b = this.boxes[i];
@@ -106,8 +124,8 @@ export class StaticWorld {
     }
     return false;
   }
-  moveCharacter(pos, delta, r, h, stepHeight, canStep) {
-    const res = { grounded: false, hitWall: false, hitCeiling: false };
+  moveCharacter(pos: Vec3, delta: Vec3, r: number, h: number, stepHeight: number, canStep: boolean): MoveResult {
+    const res: MoveResult = { grounded: false, hitWall: false, hitCeiling: false };
     const maxD = Math.max(Math.abs(delta[0]), Math.abs(delta[1]), Math.abs(delta[2]));
     const n = Math.max(1, Math.ceil(maxD / (r * 0.8)));
     for (let s = 0; s < n; s++) {
@@ -117,7 +135,7 @@ export class StaticWorld {
     }
     return res;
   }
-  moveAxis(pos, axis, d, r, h, stepHeight, canStep, res) {
+  moveAxis(pos: Vec3, axis: number, d: number, r: number, h: number, stepHeight: number, canStep: boolean, res: MoveResult): void {
     if (d === 0)
       return;
     pos[axis] = pos[axis] + d;
@@ -150,8 +168,8 @@ export class StaticWorld {
       res.hitWall = true;
     }
   }
-  resolveSphere(pos, vel, r, restitution, friction) {
-    const res = { grounded: false, impact: 0, normal: [0, 1, 0] };
+  resolveSphere(pos: Vec3, vel: Vec3, r: number, restitution: number, friction: number): SphereResult {
+    const res: SphereResult = { grounded: false, impact: 0, normal: [0, 1, 0] };
     const cand = this.query(pos[0] - r, pos[2] - r, pos[0] + r, pos[2] + r, this.scratch);
     for (const i of cand) {
       const b = this.boxes[i];
@@ -162,7 +180,7 @@ export class StaticWorld {
       const d2 = nx * nx + ny * ny + nz * nz;
       if (d2 > r * r)
         continue;
-      let pen;
+      let pen: number;
       if (d2 > 1e-12) {
         const d = Math.sqrt(d2);
         nx /= d;
@@ -206,13 +224,13 @@ export class StaticWorld {
     return res;
   }
 }
-function cellKey(x, z) {
+function cellKey(x: number, z: number): number {
   return x + 4096 << 13 | z + 4096;
 }
-function clampN(x, lo, hi) {
+function clampN(x: number, lo: number, hi: number): number {
   return x < lo ? lo : x > hi ? hi : x;
 }
-function rayBox(o, d, b, maxT) {
+function rayBox(o: Vec3, d: Vec3, b: Aabb, maxT: number): { t: number; axis: number; sign: number } | null {
   let tmin = 0;
   let tmax = maxT;
   let axis = -1;
@@ -252,7 +270,7 @@ function rayBox(o, d, b, maxT) {
   }
   return { t: tmin, axis, sign };
 }
-export function segmentSphere(p0, p1, c, r) {
+export function segmentSphere(p0: Vec3, p1: Vec3, c: Vec3, r: number): number {
   const dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
   const mx = p0[0] - c[0], my = p0[1] - c[1], mz = p0[2] - c[2];
   const a = dx * dx + dy * dy + dz * dz;
@@ -268,15 +286,15 @@ export function segmentSphere(p0, p1, c, r) {
   const t = (-b - Math.sqrt(disc)) / a;
   return t >= 0 && t <= 1 ? t : -1;
 }
-export function segmentCapsule(p0, p1, a, b, r) {
+export function segmentCapsule(p0: Vec3, p1: Vec3, a: Vec3, b: Vec3, r: number): number {
   const d1x = p1[0] - p0[0], d1y = p1[1] - p0[1], d1z = p1[2] - p0[2];
   const d2x = b[0] - a[0], d2y = b[1] - a[1], d2z = b[2] - a[2];
   const rx = p0[0] - a[0], ry = p0[1] - a[1], rz = p0[2] - a[2];
   const aa = d1x * d1x + d1y * d1y + d1z * d1z;
   const ee = d2x * d2x + d2y * d2y + d2z * d2z;
   const ff = d2x * rx + d2y * ry + d2z * rz;
-  let s;
-  let t;
+  let s: number;
+  let t: number;
   if (aa < 1e-12) {
     s = 0;
     t = clampN(ff / ee, 0, 1);

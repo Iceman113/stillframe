@@ -1,6 +1,8 @@
-// @ts-nocheck
 import { clamp, v3 } from "../engine/math";
 import { PLAYER_HEIGHT, PLAYER_RADIUS } from "./world";
+import type { Input } from "../engine/input";
+import type { LookSettings, PlayerFrame, Vec3 } from "./types";
+import type { World } from "./world";
 
 export const WALK_SPEED = 4;
 const ACCEL = 30;
@@ -20,7 +22,7 @@ export class PlayerController {
   mouseDx = 0;
   mouseDy = 0;
   delta = v3();
-  reset(pos, yaw) {
+  reset(pos: Vec3, yaw: number): void {
     this.pos[0] = pos[0];
     this.pos[1] = pos[1];
     this.pos[2] = pos[2];
@@ -30,7 +32,7 @@ export class PlayerController {
     this.grounded = true;
     this.stride = 0;
   }
-  look(input, dt, s) {
+  look(input: Input, dt: number, s: LookSettings): void {
     this.mouseDx = input.mouseDx;
     this.mouseDy = input.mouseDy;
     this.yaw += input.mouseDx * s.sensitivity;
@@ -39,7 +41,7 @@ export class PlayerController {
     this.yaw %= Math.PI * 2;
     this.lookSpeed = dt > 0 ? Math.hypot(input.mouseDx, input.mouseDy) / dt : 0;
   }
-  update(input, dt, world, s, canMove) {
+  update(input: Input, dt: number, world: World, s: LookSettings, canMove: boolean): void {
     this.look(input, dt, s);
     const axes = canMove ? input.moveAxes() : { x: 0, y: 0 };
     const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
@@ -81,10 +83,10 @@ export class PlayerController {
     }
     this.stride += Math.hypot(this.vel[0], this.vel[2]) * dt;
   }
-  get planarSpeed() {
+  get planarSpeed(): number {
     return Math.hypot(this.vel[0], this.vel[2]);
   }
-  toFrame(fire, throwItem, interact) {
+  toFrame(fire: boolean, throwItem: boolean, interact: boolean): PlayerFrame {
     return {
       pos: [this.pos[0], this.pos[1], this.pos[2]],
       vel: [this.vel[0], this.vel[1], this.vel[2]],

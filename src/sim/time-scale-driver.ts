@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { approach, clamp } from "../engine/math";
 
 export class TimeScaleDriver {
@@ -10,14 +9,14 @@ export class TimeScaleDriver {
   static FALL = 0.1;
   value = TimeScaleDriver.MIN;
   kick = 0;
-  reset() {
+  reset(): void {
     this.value = TimeScaleDriver.MIN;
     this.kick = 0;
   }
-  actionKick() {
+  actionKick(): void {
     this.kick = TimeScaleDriver.KICK_TIME;
   }
-  update(realDt, planarSpeed, maxSpeed, lookSpeed, airborne, busy) {
+  update(realDt: number, planarSpeed: number, maxSpeed: number, lookSpeed: number, airborne: boolean, busy: boolean): number {
     this.kick = Math.max(0, this.kick - realDt);
     const moveInput = clamp(planarSpeed / maxSpeed, 0, 1);
     const lookInput = clamp(lookSpeed / TimeScaleDriver.LOOK_FULL, 0, 1) * TimeScaleDriver.LOOK_WEIGHT;

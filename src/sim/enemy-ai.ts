@@ -1,8 +1,20 @@
-// @ts-nocheck
 import { angleDiff, approach, clamp, copy, distXZ, turnToward, v3, yawOf } from "../engine/math";
 import { BULLET_SPEED, WEAPONS, isGun, newItem } from "./items";
+import type { Enemy, EnemyKind, EnemyState, ItemKind, Vec3 } from "./types";
+import type { World } from "./world";
 
-const ENEMY_PARAMS = {
+interface EnemyParams {
+  speed: number;
+  turnRate: number;
+  reaction: number;
+  aimError: number;
+  keepDist: number;
+  cooldownMul: number;
+  hp: number;
+  defaultWeapon: ItemKind | null;
+}
+
+const ENEMY_PARAMS: Record<EnemyKind, EnemyParams> = {
   walker: { speed: 2.3, turnRate: 5, reaction: 0.5, aimError: 3.2, keepDist: 6, cooldownMul: 2.4, hp: 2, defaultWeapon: "pistol" },
   rusher: { speed: 5.2, turnRate: 9, reaction: 0.25, aimError: 0, keepDist: 0, cooldownMul: 1, hp: 2, defaultWeapon: null },
   marksman: { speed: 1.1, turnRate: 3.2, reaction: 0.7, aimError: 1, keepDist: 40, cooldownMul: 1, hp: 2, defaultWeapon: "carbine" }
@@ -21,8 +33,8 @@ const MELEE_RANGE = 1.5;
 const TELEGRAPH = 0.6;
 const MARKSMAN_COOLDOWN = 1.9;
 const GRAVITY = 18;
-const MUZZLE_LOCAL = [0.24, 1.48, -0.72];
-export function createEnemy(id, kind, pos, yaw, weapon, idle, seed) {
+const MUZZLE_LOCAL: Vec3 = [0.24, 1.48, -0.72];
+export function createEnemy(id: number, kind: EnemyKind, pos: Vec3, yaw: number, weapon: ItemKind | null | undefined, idle: boolean, seed: number): Enemy {
   const params = ENEMY_PARAMS[kind];
   const w = weapon === void 0 ? params.defaultWeapon : weapon;
   return {
@@ -68,10 +80,10 @@ export function createEnemy(id, kind, pos, yaw, weapon, idle, seed) {
     lastShotId: -1
   };
 }
-export function enemyIsTwoHanded(e) {
+export function enemyIsTwoHanded(e: Enemy): boolean {
   return !!e.weapon && (e.weapon.kind === "scatter" || e.weapon.kind === "carbine");
 }
-export function enemyMuzzle(e, out) {
+export function enemyMuzzle(e: Enemy, out: Vec3): Vec3 {
   const c = Math.cos(e.yaw);
   const s = Math.sin(e.yaw);
   const lx = MUZZLE_LOCAL[0], lz = MUZZLE_LOCAL[2];
@@ -83,7 +95,7 @@ export function enemyMuzzle(e, out) {
 const scratchA = v3();
 const scratchB = v3();
 const scratchC = v3();
-export function savePrev(e) {
+export function savePrev(e: Enemy): void {
   copy(e.prevPos, e.pos);
   e.prevYaw = e.yaw;
   e.prevWalkPhase = e.walkPhase;
@@ -92,7 +104,7 @@ export function savePrev(e) {
   e.prevSpawnT = e.spawnT;
   e.prevMeleeT = e.meleeT;
 }
-export function updateEnemy(world, e, dt) {
+export function updateEnemy(world: World, e: Enemy, dt: number): void {
   const params = ENEMY_PARAMS[e.kind];
   e.stateTime += dt;
   e.hitFlash = Math.max(0, e.hitFlash - dt * 4);
@@ -120,7 +132,7 @@ export function updateEnemy(world, e, dt) {
     e.aimTimer = Math.max(e.aimTimer, params.reaction * 0.6);
   e.seesPlayer = canSee;
   let desiredYaw = e.yaw;
-  let moveTarget = null;
+  let moveTarget: Vec3 | null = null;
   let speed = 0;
   let aimWanted = false;
   let stopDist = 0.3;
@@ -254,11 +266,11 @@ export function updateEnemy(world, e, dt) {
   if (e.pos[1] < -6)
     world.killEnemy(e, [0, -1, 0], e.pos, true);
 }
-function setState(e, s) {
+function setState(e: Enemy, s: EnemyState): void {
   e.state = s;
   e.stateTime = 0;
 }
-function applyGravityAndMove(world, e, vx, vz, dt) {
+function applyGravityAndMove(world: World, e: Enemy, vx: number, vz: number, dt: number): void {
   e.vel[1] -= GRAVITY * dt;
   if (e.vel[1] < -30)
     e.vel[1] = -30;
@@ -272,7 +284,7 @@ function applyGravityAndMove(world, e, vx, vz, dt) {
   if (res.hitCeiling && e.vel[1] > 0)
     e.vel[1] = 0;
 }
-function nextWaypoint(world, e, target, dt) {
+function nextWaypoint(world: World, e: Enemy, target: Vec3, dt: number): Vec3 {
   const straight = distXZ(target, e.pos) < 2.2 && Math.abs(target[1] - e.pos[1]) < 0.5;
   if (straight) {
     e.path = null;
@@ -292,7 +304,7 @@ function nextWaypoint(world, e, target, dt) {
     e.pathIndex++;
   return path[e.pathIndex];
 }
-function handleShooting(world, e, dt, aligned) {
+function handleShooting(world: World, e: Enemy, dt: number, aligned: boolean): void {
   const w = e.weapon;
   if (!w || !isGun(w.kind))
     return;
@@ -332,7 +344,7 @@ function handleShooting(world, e, dt, aligned) {
     e.fireCooldown = def.cooldown * params.cooldownMul + world.rng.next() * 0.6;
   }
 }
-function aimDirection(world, e, errorDeg, out) {
+function aimDirection(world: World, e: Enemy, errorDeg: number, out: Vec3): Vec3 {
   const muzzle = enemyMuzzle(e, v3());
   const p = world.player;
   const tx = p.pos[0], ty = p.pos[1] + 1.25, tz = p.pos[2];
@@ -344,7 +356,7 @@ function aimDirection(world, e, errorDeg, out) {
   world.perturbDirection(out, errorDeg);
   return out;
 }
-function fireVolley(world, e, dir, pellets, spread) {
+function fireVolley(world: World, e: Enemy, dir: Vec3, pellets: number, spread: number): void {
   const muzzle = enemyMuzzle(e, v3());
   const chest = [e.pos[0], e.pos[1] + 1.4, e.pos[2]];
   if (!world.static.lineClear(chest, muzzle))
@@ -359,7 +371,7 @@ function fireVolley(world, e, dir, pellets, spread) {
   }
   world.events.push({ type: "shot", pos: muzzle, dir: [dir[0], dir[1], dir[2]], weapon: e.weapon?.kind ?? "pistol", byPlayer: false });
 }
-function meleeStrike(world, e) {
+function meleeStrike(world: World, e: Enemy): void {
   e.meleeCooldown = 0.9;
   const p = world.player;
   if (!p.alive)

@@ -1,24 +1,26 @@
-// @ts-nocheck
+import type { StaticWorld } from "./static-world";
+import type { Vec3 } from "./types";
+
 const CELL = 0.5;
 const AGENT_RADIUS = 0.32;
 const STEP = 0.4;
 const HEADROOM = 1.75;
 const MAX_FLOOR = 3.3;
 export class NavGrid {
-  world;
-  originX;
-  originZ;
-  w;
-  h;
-  floor;
-  gScore;
-  fScore;
-  cameFrom;
-  closed;
-  openStamp;
+  world: StaticWorld;
+  originX: number;
+  originZ: number;
+  w: number;
+  h: number;
+  floor: Float32Array;
+  gScore: Float32Array;
+  fScore: Float32Array;
+  cameFrom: Int32Array;
+  closed: Uint32Array;
+  openStamp: Uint32Array;
   searchId = 0;
-  heap = [];
-  constructor(world) {
+  heap: number[] = [];
+  constructor(world: StaticWorld) {
     this.world = world;
     const b = world.bounds;
     this.originX = Math.floor(b.min[0]);
@@ -34,9 +36,9 @@ export class NavGrid {
     this.openStamp = new Uint32Array(n);
     this.bake();
   }
-  bake() {
+  bake(): void {
     const boxes = this.world.boxes;
-    const cand = [];
+    const cand: number[] = [];
     for (let cz = 0; cz < this.h; cz++) {
       for (let cx = 0; cx < this.w; cx++) {
         const x = this.originX + (cx + 0.5) * CELL;
@@ -64,17 +66,17 @@ export class NavGrid {
       }
     }
   }
-  cellOf(x, z) {
+  cellOf(x: number, z: number): number {
     const cx = Math.floor((x - this.originX) / CELL);
     const cz = Math.floor((z - this.originZ) / CELL);
     if (cx < 0 || cz < 0 || cx >= this.w || cz >= this.h)
       return -1;
     return cz * this.w + cx;
   }
-  walkable(cell) {
+  walkable(cell: number): boolean {
     return cell >= 0 && !Number.isNaN(this.floor[cell]);
   }
-  center(cell, out) {
+  center(cell: number, out: Vec3): Vec3 {
     const cx = cell % this.w;
     const cz = (cell - cx) / this.w;
     out[0] = this.originX + (cx + 0.5) * CELL;
@@ -82,7 +84,7 @@ export class NavGrid {
     out[2] = this.originZ + (cz + 0.5) * CELL;
     return out;
   }
-  nearestWalkable(x, z, nearY) {
+  nearestWalkable(x: number, z: number, nearY: number): number {
     const c0 = this.cellOf(x, z);
     if (this.walkable(c0) && Math.abs(this.floor[c0] - nearY) < 1.2)
       return c0;
@@ -113,7 +115,7 @@ export class NavGrid {
     }
     return -1;
   }
-  findPath(from, to, maxExpansions = 4e3) {
+  findPath(from: Vec3, to: Vec3, maxExpansions = 4e3): Vec3[] | null {
     const start = this.nearestWalkable(from[0], from[2], from[1]);
     const goal = this.nearestWalkable(to[0], to[2], to[1]);
     if (start < 0 || goal < 0)
@@ -124,7 +126,7 @@ export class NavGrid {
     const sid = this.searchId;
     const w = this.w;
     const gx = goal % w, gz = (goal - gx) / w;
-    const heur = (c) => {
+    const heur = (c: number): number => {
       const cx = c % w, cz = (c - cx) / w;
       const dx = Math.abs(cx - gx), dz = Math.abs(cz - gz);
       return Math.max(dx, dz) + 0.4142 * Math.min(dx, dz);
@@ -180,14 +182,14 @@ export class NavGrid {
     }
     if (!found)
       return null;
-    const cells = [];
+    const cells: number[] = [];
     for (let c = goal; c !== -1; c = this.cameFrom[c])
       cells.push(c);
     cells.reverse();
     return this.smooth(cells, to);
   }
-  smooth(cells, to) {
-    const out = [];
+  smooth(cells: number[], to: Vec3): Vec3[] {
+    const out: Vec3[] = [];
     let anchor = 0;
     let i = 1;
     while (i < cells.length) {
@@ -210,7 +212,7 @@ export class NavGrid {
     }
     return out;
   }
-  gridLineClear(a, b) {
+  gridLineClear(a: number, b: number): boolean {
     const pa = this.center(a, [0, 0, 0]);
     const pb = this.center(b, [0, 0, 0]);
     const d = Math.hypot(pb[0] - pa[0], pb[2] - pa[2]);
@@ -234,7 +236,7 @@ export class NavGrid {
     }
     return true;
   }
-  heapPush(c) {
+  heapPush(c: number): void {
     const heap = this.heap;
     const f = this.fScore;
     heap.push(c);
@@ -249,13 +251,13 @@ export class NavGrid {
       i = p;
     }
   }
-  heapPop() {
+  heapPop(): number {
     const heap = this.heap;
     const f = this.fScore;
     const top = heap[0];
     const last = heap.pop();
     if (heap.length > 0) {
-      heap[0] = last;
+      heap[0] = last!;
       let i = 0;
       for (; ; ) {
         const l = i * 2 + 1;

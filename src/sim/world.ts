@@ -1,10 +1,13 @@
-// @ts-nocheck
 import { clamp, copy, dirFromYawPitch, distSq, distXZ, dot, len, normalize, v3 } from "../engine/math";
 import { Rng } from "../engine/rng";
 import { BODY_A, BODY_B, BODY_RADIUS, HEAD_OFFSET, HEAD_RADIUS, createEnemy, enemyMuzzle, savePrev, updateEnemy } from "./enemy-ai";
 import { BULLET_LIFE, BULLET_RADIUS, BULLET_SPEED, FRAGILE, ITEM_RADIUS, WEAPONS, isGun, isWeapon, newItem } from "./items";
 import { NavGrid } from "./nav-grid";
 import { StaticWorld, segmentCapsule, segmentSphere } from "./static-world";
+import type { LevelDef, SpawnDef } from "../levels/types";
+import type { Enemy, GunKind, Item, ItemKind, Laser, PlayerFrame, PlayerState, Projectile, Prop, SharedStatic, Vec3, WorldEvent } from "./types";
+
+type BulletHit = "none" | "static" | "head" | "enemy" | "player" | "prop";
 
 export const EYE_HEIGHT = 1.6;
 export const PLAYER_RADIUS = 0.3;
@@ -20,7 +23,7 @@ const PUNCH_COOLDOWN = 0.32;
 const PUNCH_RANGE = 1.7;
 const SLASH_RANGE = 2.2;
 const SHOT_HEARING = 16;
-const REST_ROT = {
+const REST_ROT: Record<ItemKind, number[]> = {
   pistol: [0, Math.PI / 2],
   scatter: [0, Math.PI / 2],
   carbine: [0, Math.PI / 2],
@@ -30,29 +33,29 @@ const REST_ROT = {
   mug: [0, 0]
 };
 export class World {
-  def;
-  static;
-  nav;
-  rng;
-  events = [];
-  enemies = [];
-  props = [];
-  projectiles = [];
-  player;
+  def: LevelDef;
+  static: StaticWorld;
+  nav: NavGrid;
+  rng: Rng;
+  events: WorldEvent[] = [];
+  enemies: Enemy[] = [];
+  props: Prop[] = [];
+  projectiles: Projectile[] = [];
+  player: PlayerState;
   stats = { kills: 0, shots: 0 };
   simTime = 0;
   cleared = false;
   failed = false;
-  aimProp = null;
+  aimProp: Prop | null = null;
   nextId = 1;
   shotCounter = 0;
   waveIndex = 0;
   waveArmed = false;
   waveDelay = 0;
   lastWaveTime = 0;
-  spawnQueue = [];
-  recentShots = [];
-  constructor(def, sharedStatic) {
+  spawnQueue: { spawn: SpawnDef }[] = [];
+  recentShots: { pos: Vec3; time: number }[] = [];
+  constructor(def: LevelDef, sharedStatic?: SharedStatic) {
     this.def = def;
     this.rng = new Rng(def.seed);
     if (sharedStatic) {
@@ -89,28 +92,28 @@ export class World {
     this.updateWaves(0);
     this.flushSpawnQueue(true);
   }
-  get staticData() {
+  get staticData(): SharedStatic {
     return { static: this.static, nav: this.nav };
   }
-  playerEye(out) {
+  playerEye(out: Vec3): Vec3 {
     out[0] = this.player.pos[0];
     out[1] = this.player.pos[1] + EYE_HEIGHT;
     out[2] = this.player.pos[2];
     return out;
   }
-  newShotId() {
+  newShotId(): number {
     return ++this.shotCounter;
   }
-  get aliveEnemies() {
+  get aliveEnemies(): number {
     return this.enemies.length;
   }
-  get remainingEnemies() {
+  get remainingEnemies(): number {
     let queued = this.spawnQueue.length;
     for (let i = this.waveIndex; i < this.def.waves.length; i++)
       queued += this.def.waves[i].spawns.length;
     return this.enemies.length + queued;
   }
-  applyPlayerFrame(f) {
+  applyPlayerFrame(f: PlayerFrame): boolean {
     const p = this.player;
     copy(p.pos, f.pos);
     copy(p.vel, f.vel);
@@ -141,7 +144,7 @@ export class World {
       this.killPlayer([0, -1, 0]);
     return acted;
   }
-  primaryAction() {
+  primaryAction(): boolean {
     const p = this.player;
     const held = p.held;
     if (held) {
@@ -181,15 +184,15 @@ export class World {
     }
     return false;
   }
-  forward(out) {
+  forward(out: Vec3): Vec3 {
     return dirFromYawPitch(out, this.player.yaw, this.player.pitch);
   }
-  playerVolley(kind) {
+  playerVolley(kind: GunKind): void {
     const p = this.player;
     const def = WEAPONS[kind];
     const eye = this.playerEye(v3());
     const fwd = this.forward(v3());
-    const right = [Math.cos(p.yaw), 0, -Math.sin(p.yaw)];
+    const right: Vec3 = [Math.cos(p.yaw), 0, -Math.sin(p.yaw)];
     const hit = this.static.raycast(eye, fwd, 80);
     const target = hit ? hit.point : [eye[0] + fwd[0] * 80, eye[1] + fwd[1] * 80, eye[2] + fwd[2] * 80];
     let muzzle = [
@@ -215,7 +218,7 @@ export class World {
     this.recentShots.push({ pos: [eye[0], eye[1], eye[2]], time: this.simTime });
     this.events.push({ type: "shot", pos: muzzle, dir, weapon: kind, byPlayer: true });
   }
-  punch() {
+  punch(): void {
     const p = this.player;
     p.punchCooldown = PUNCH_COOLDOWN;
     p.punchAge = 0;
@@ -237,7 +240,7 @@ export class World {
       this.stun(target, 0.9, fwd, 2.5);
     }
   }
-  slash() {
+  slash(): void {
     const p = this.player;
     p.slashAge = 0;
     const eye = this.playerEye(v3());
@@ -274,10 +277,10 @@ export class World {
     }
     this.events.push({ type: "slash", hit });
   }
-  meleeTarget(range, minDot) {
+  meleeTarget(range: number, minDot: number): Enemy | null {
     const eye = this.playerEye(v3());
     const fwd = this.forward(v3());
-    let best = null;
+    let best: Enemy | null = null;
     let bestD = Infinity;
     for (const e of this.enemies) {
       if (!e.alive || e.spawnT < 1)
@@ -297,7 +300,7 @@ export class World {
     }
     return best;
   }
-  throwHeld(strength) {
+  throwHeld(strength: number): void {
     const p = this.player;
     const item = p.held;
     if (!item)
@@ -318,7 +321,7 @@ export class World {
     prop.angVel = [this.rng.sym(12) - 8 * strength, this.rng.sym(4), this.rng.sym(6)];
     this.events.push({ type: "throw" });
   }
-  pickUp(prop) {
+  pickUp(prop: Prop): void {
     const p = this.player;
     prop.alive = false;
     p.held = prop.item;
@@ -326,10 +329,10 @@ export class World {
     p.pickupAge = 0;
     this.events.push({ type: "pickup", kind: prop.item.kind });
   }
-  findAimProp() {
+  findAimProp(): Prop | null {
     const eye = this.playerEye(v3());
     const fwd = this.forward(v3());
-    let best = null;
+    let best: Prop | null = null;
     let bestScore = Infinity;
     for (const pr of this.props) {
       if (!pr.alive || pr.thrown)
@@ -350,8 +353,8 @@ export class World {
     }
     return best;
   }
-  nearestPropInRadius(r) {
-    let best = null;
+  nearestPropInRadius(r: number): Prop | null {
+    let best: Prop | null = null;
     let bestD = r;
     for (const pr of this.props) {
       if (!pr.alive || pr.thrown)
@@ -364,7 +367,7 @@ export class World {
     }
     return best;
   }
-  spawnProjectile(origin, dir, ownerId, shotId) {
+  spawnProjectile(origin: Vec3, dir: Vec3, ownerId: number, shotId: number): void {
     this.projectiles.push({
       pos: [origin[0], origin[1], origin[2]],
       prevPos: [origin[0], origin[1], origin[2]],
@@ -378,7 +381,7 @@ export class World {
     if (ownerId !== 0)
       this.recentShots.push({ pos: [origin[0], origin[1], origin[2]], time: this.simTime });
   }
-  perturbDirection(d, coneDeg) {
+  perturbDirection(d: Vec3, coneDeg: number): void {
     normalize(d, d);
     if (coneDeg <= 0)
       return;
@@ -395,14 +398,14 @@ export class World {
     d[2] += ax[2] * ox + ay[2] * oy;
     normalize(d, d);
   }
-  heardShot(pos) {
+  heardShot(pos: Vec3): boolean {
     for (const s of this.recentShots) {
       if (this.simTime - s.time < 0.5 && distSq(s.pos, pos) < SHOT_HEARING * SHOT_HEARING)
         return true;
     }
     return false;
   }
-  killPlayer(dir) {
+  killPlayer(dir: Vec3): void {
     const p = this.player;
     if (!p.alive || p.invulnerable)
       return;
@@ -410,7 +413,7 @@ export class World {
     this.failed = true;
     this.events.push({ type: "playerDeath", dir });
   }
-  killEnemy(e, dir, point, silent) {
+  killEnemy(e: Enemy, dir: Vec3, point: Vec3, silent: boolean): void {
     if (!e.alive)
       return;
     e.alive = false;
@@ -419,7 +422,7 @@ export class World {
       this.disarm(e, dir);
     this.events.push({ type: "enemyDeath", enemy: e, dir: [dir[0], dir[1], dir[2]], point: [point[0], point[1], point[2]], silent });
   }
-  disarm(e, dir) {
+  disarm(e: Enemy, dir: Vec3): void {
     if (!e.weapon)
       return;
     const item = e.weapon;
@@ -440,7 +443,7 @@ export class World {
     const pr = this.addProp(dropped, pos, vel, false);
     pr.angVel = [this.rng.sym(8), this.rng.sym(8), this.rng.sym(8)];
   }
-  stun(e, seconds, dir, push) {
+  stun(e: Enemy, seconds: number, dir: Vec3, push: number): void {
     e.state = "stunned";
     e.stateTime = 0;
     e.stunTimer = seconds;
@@ -451,14 +454,14 @@ export class World {
     e.vel[2] += dir[2] * push;
     this.events.push({ type: "enemyHit", pos: [e.pos[0], e.pos[1] + 1.3, e.pos[2]], dir: [dir[0], dir[1], dir[2]] });
   }
-  findGunPropFor(e) {
+  findGunPropFor(e: Enemy): Prop | null {
     if (e.targetPropId >= 0) {
       const cur = this.props.find((p) => p.id === e.targetPropId && p.alive && !p.thrown);
       if (cur)
         return cur;
       e.targetPropId = -1;
     }
-    let best = null;
+    let best: Prop | null = null;
     let bestD = 10;
     for (const pr of this.props) {
       if (!pr.alive || pr.thrown || !isGun(pr.item.kind) || pr.claimedBy >= 0 && pr.claimedBy !== e.id)
@@ -477,14 +480,14 @@ export class World {
     }
     return best;
   }
-  enemyPickUp(e, prop) {
+  enemyPickUp(e: Enemy, prop: Prop): void {
     prop.alive = false;
     e.weapon = prop.item;
     e.targetPropId = -1;
     e.fireCooldown = 0.8;
     e.aimTimer = 0.6;
   }
-  step(dt) {
+  step(dt: number): void {
     this.simTime += dt;
     const p = this.player;
     for (const e of this.enemies)
@@ -528,7 +531,7 @@ export class World {
       this.recentShots.shift();
     this.checkWin();
   }
-  updateWaves(dt) {
+  updateWaves(dt: number): void {
     const waves = this.def.waves;
     while (this.waveIndex < waves.length) {
       const w = waves[this.waveIndex];
@@ -567,12 +570,12 @@ export class World {
       this.lastWaveTime = this.simTime;
     }
   }
-  flushSpawnQueue(initial) {
+  flushSpawnQueue(initial: boolean): void {
     const max = this.def.maxActive ?? 8;
     while (this.spawnQueue.length > 0 && this.enemies.length < max) {
-      const q = this.spawnQueue.shift();
+      const q = this.spawnQueue.shift()!;
       const s = q.spawn;
-      const pos = s.pos.length === 2 ? [s.pos[0], 0.05, s.pos[1]] : [s.pos[0], s.pos[1] + 0.05, s.pos[2]];
+      const pos: Vec3 = s.pos.length === 2 ? [s.pos[0], 0.05, s.pos[1]] : [s.pos[0], s.pos[1] + 0.05, s.pos[2]];
       const yaw = s.yaw ?? Math.atan2(-(this.player.pos[0] - pos[0]), -(this.player.pos[2] - pos[2]));
       const e = createEnemy(this.nextId++, s.kind, pos, yaw, s.weapon, !!s.idle, this.rng.next());
       if (initial)
@@ -583,7 +586,7 @@ export class World {
         this.events.push({ type: "spawn", pos: [pos[0], pos[1], pos[2]] });
     }
   }
-  checkWin() {
+  checkWin(): void {
     if (this.cleared || this.failed || !this.player.alive)
       return;
     const allSpawned = this.waveIndex >= this.def.waves.length && this.spawnQueue.length === 0;
@@ -601,8 +604,8 @@ export class World {
     if (this.cleared)
       this.player.invulnerable = true;
   }
-  addProp(item, pos, vel, thrown) {
-    const pr = {
+  addProp(item: Item, pos: Vec3, vel: Vec3, thrown: boolean): Prop {
+    const pr: Prop = {
       id: this.nextId++,
       item,
       pos: [pos[0], pos[1], pos[2]],
@@ -620,7 +623,7 @@ export class World {
     this.props.push(pr);
     return pr;
   }
-  stepProps(dt) {
+  stepProps(dt: number): void {
     for (const pr of this.props) {
       if (!pr.alive || pr.sleeping)
         continue;
@@ -702,15 +705,15 @@ export class World {
         pr.alive = false;
     }
   }
-  breakProp(pr) {
+  breakProp(pr: Prop): void {
     pr.alive = false;
     this.events.push({ type: "itemBreak", pos: [pr.pos[0], pr.pos[1], pr.pos[2]], kind: pr.item.kind });
   }
-  wake(pr) {
+  wake(pr: Prop): void {
     pr.sleeping = false;
     pr.restTimer = 0;
   }
-  stepProjectiles(dt) {
+  stepProjectiles(dt: number): void {
     const bullets = this.projectiles;
     const playerHead = v3();
     const pa = v3();
@@ -729,10 +732,10 @@ export class World {
       const segLen = BULLET_SPEED * dt;
       normalize(dirN, b.vel);
       let bestT = 1;
-      let hitKind = "none";
-      let hitEnemy = null;
-      let hitProp = null;
-      let hitNormal = [0, 1, 0];
+      let hitKind: BulletHit = "none";
+      let hitEnemy: Enemy | null = null;
+      let hitProp: Prop | null = null;
+      let hitNormal: Vec3 = [0, 1, 0];
       const sh = this.static.raycast(b.pos, dirN, segLen);
       if (sh) {
         bestT = sh.t / segLen;
@@ -852,8 +855,8 @@ export class World {
       }
     }
   }
-  activeLasers() {
-    const out = [];
+  activeLasers(): Laser[] {
+    const out: Laser[] = [];
     for (const e of this.enemies) {
       if (!e.alive || e.telegraph <= 0)
         continue;
@@ -862,7 +865,7 @@ export class World {
     return out;
   }
 }
-function removeDead(list) {
+function removeDead<T extends { alive: boolean }>(list: T[]): void {
   let w = 0;
   for (let r = 0; r < list.length; r++) {
     const item = list[r];
