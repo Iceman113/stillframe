@@ -1,21 +1,25 @@
-// @ts-nocheck
 import { mat4 } from "wgpu-matrix";
+import type { Mat4 } from "wgpu-matrix";
 import { approach, clamp } from "../engine/math";
+import type { Renderer } from "../gfx/renderer";
+import type { Rgb } from "../gfx/mesh-builder";
+import type { ItemKind, PlayerState, Vec3 } from "../sim/types";
+import type { MeshLibrary } from "./mesh-library";
 
-const GLOVE = [1, 1, 1];
+const GLOVE: Rgb = [1, 1, 1];
 export class Viewmodel {
   swayX = 0;
   swayY = 0;
   bobAmount = 0;
-  cam = mat4.create();
-  m = mat4.create();
-  hand = mat4.create();
-  update(realDt, mouseDx, mouseDy, planarSpeed, grounded) {
+  cam: Mat4 = mat4.create();
+  m: Mat4 = mat4.create();
+  hand: Mat4 = mat4.create();
+  update(realDt: number, mouseDx: number, mouseDy: number, planarSpeed: number, grounded: boolean): void {
     this.swayX = approach(this.swayX, clamp(-mouseDx * 9e-4, -0.05, 0.05), 0.08, realDt);
     this.swayY = approach(this.swayY, clamp(mouseDy * 9e-4, -0.05, 0.05), 0.08, realDt);
     this.bobAmount = approach(this.bobAmount, grounded ? clamp(planarSpeed / 4, 0, 1) : 0, 0.1, realDt);
   }
-  draw(renderer, meshes, eye, yaw, pitch, p, stride, reduceMotion) {
+  draw(renderer: Renderer, meshes: MeshLibrary, eye: Vec3, yaw: number, pitch: number, p: PlayerState, stride: number, reduceMotion: boolean): void {
     const cam = this.cam;
     mat4.translation([eye[0], eye[1], eye[2]], cam);
     mat4.rotateY(cam, yaw, cam);
@@ -80,7 +84,7 @@ export class Viewmodel {
       this.drawFistAt(renderer, meshes, this.m);
     }
   }
-  drawItem(renderer, meshes, kind, hand) {
+  drawItem(renderer: Renderer, meshes: MeshLibrary, kind: ItemKind, hand: Mat4): void {
     const m2 = this.m;
     switch (kind) {
       case "pistol":
@@ -100,7 +104,7 @@ export class Viewmodel {
     }
     renderer.drawMesh(meshes.items[kind], m2, [1, 1, 1], 0.08, "viewmodel");
   }
-  drawArm(renderer, meshes, x, y, z, side, ext) {
+  drawArm(renderer: Renderer, meshes: MeshLibrary, x: number, y: number, z: number, side: number, ext: number): void {
     const m2 = this.hand;
     mat4.translate(this.cam, [x, y, z], m2);
     mat4.rotateY(m2, side * 0.12 - ext * 0.1 * side, m2);
@@ -108,10 +112,10 @@ export class Viewmodel {
     this.drawFistAt(renderer, meshes, m2);
     this.drawArmFromHand(renderer, meshes, m2);
   }
-  drawFistAt(renderer, meshes, m2) {
+  drawFistAt(renderer: Renderer, meshes: MeshLibrary, m2: Mat4): void {
     renderer.drawMesh(meshes.fist, m2, GLOVE, 0, "viewmodel");
   }
-  drawArmFromHand(renderer, meshes, hand) {
+  drawArmFromHand(renderer: Renderer, meshes: MeshLibrary, hand: Mat4): void {
     const fa = mat4.translate(hand, [0, -0.01, 0.04]);
     mat4.rotateX(fa, Math.PI / 2 - 0.15, fa);
     renderer.drawMesh(meshes.forearm, fa, GLOVE, 0, "viewmodel");

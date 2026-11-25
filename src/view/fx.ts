@@ -1,8 +1,45 @@
-// @ts-nocheck
 import { mat4 } from "wgpu-matrix";
 import { v3 } from "../engine/math";
 import { Rng } from "../engine/rng";
+import type { Mat4 } from "wgpu-matrix";
 import { PART_CENTER, PART_EXTENTS, PART_IDS } from "./mesh-library";
+import type { MeshLibrary } from "./mesh-library";
+import type { Pose } from "./enemy-pose";
+import type { Renderer } from "../gfx/renderer";
+import type { Rgb } from "../gfx/mesh-builder";
+import type { Vec3 } from "../sim/types";
+
+/** A short-lived glowing particle, drawn as a camera-facing segment. */
+export interface Particle {
+  pos: Vec3;
+  vel: Vec3;
+  life: number;
+  maxLife: number;
+  size: number;
+  color: Rgb;
+  drag: number;
+  gravity: number;
+  /** Streak length in seconds of velocity; 0 draws a round dot. */
+  streak: number;
+  alive: boolean;
+}
+/** A glass fragment with simple physics against the static world. */
+export interface Shard {
+  pos: Vec3;
+  vel: Vec3;
+  rot: Vec3;
+  angVel: Vec3;
+  scale: number;
+  life: number;
+  /** Index into MeshLibrary.shards. */
+  mesh: number;
+  tint: Rgb;
+  sleeping: boolean;
+}
+/** What FxSystem.update needs from the static world (StaticWorld satisfies it). */
+export interface SphereCollider {
+  resolveSphere(pos: Vec3, vel: Vec3, r: number, restitution: number, friction: number): { impact: number; grounded: boolean };
+}
 
 const visualRng = new Rng(12648430);
 
@@ -10,27 +47,27 @@ const MAX_PARTICLES = 3e3;
 const MAX_SHARDS = 900;
 const SHARD_LIFE = 7;
 export class FxSystem {
-  particles = [];
-  shards = [];
-  model = mat4.create();
-  tmpA = v3();
-  tmpB = v3();
-  clear() {
+  particles: Particle[] = [];
+  shards: Shard[] = [];
+  model: Mat4 = mat4.create();
+  tmpA: Vec3 = v3();
+  tmpB: Vec3 = v3();
+  clear(): void {
     this.particles.length = 0;
     this.shards.length = 0;
   }
-  get particleCount() {
+  get particleCount(): number {
     return this.particles.length;
   }
-  get shardCount() {
+  get shardCount(): number {
     return this.shards.length;
   }
-  emit(p) {
+  emit(p: Omit<Particle, "alive">): void {
     if (this.particles.length >= MAX_PARTICLES)
       this.particles.shift();
     this.particles.push({ ...p, alive: true });
   }
-  sparks(pos, normal, count, color = [6, 3.2, 1.2]) {
+  sparks(pos: Vec3, normal: Vec3, count: number, color: Rgb = [6, 3.2, 1.2]): void {
     for (let i = 0; i < count; i++) {
       const s = visualRng.range(2, 7);
       this.emit({
@@ -46,7 +83,7 @@ export class FxSystem {
       });
     }
   }
-  dust(pos, normal, count) {
+  dust(pos: Vec3, normal: Vec3, count: number): void {
     for (let i = 0; i < count; i++) {
       const s = visualRng.range(0.3, 1.2);
       this.emit({
@@ -62,7 +99,7 @@ export class FxSystem {
       });
     }
   }
-  glints(pos, count, tint, speed = 3) {
+  glints(pos: Vec3, count: number, tint: Rgb, speed: number = 3): void {
     for (let i = 0; i < count; i++) {
       const s = visualRng.range(0.5, speed);
       const dir = randomUnit(this.tmpA);
@@ -79,7 +116,7 @@ export class FxSystem {
       });
     }
   }
-  muzzleFlash(pos, dir, big) {
+  muzzleFlash(pos: Vec3, dir: Vec3, big: boolean): void {
     const n = big ? 10 : 6;
     for (let i = 0; i < n; i++) {
       const s = visualRng.range(1, big ? 6 : 4);
@@ -97,7 +134,7 @@ export class FxSystem {
     }
     this.emit({ pos: [pos[0], pos[1], pos[2]], vel: [0, 0, 0], life: 0, maxLife: 0.05, size: big ? 0.12 : 0.08, color: [10, 7, 3], drag: 0, gravity: 0, streak: 0 });
   }
-  spawnShimmer(pos, tint) {
+  spawnShimmer(pos: Vec3, tint: Rgb): void {
     for (let i = 0; i < 24; i++) {
       const a = visualRng.next() * Math.PI * 2;
       const r = visualRng.range(0.2, 0.6);
@@ -114,7 +151,7 @@ export class FxSystem {
       });
     }
   }
-  shatter(pose, dir, point, tint, meshCount) {
+  shatter(pose: Pose, dir: Vec3, point: Vec3, tint: Rgb, meshCount: number): void {
     const local = this.tmpB;
     for (const id of PART_IDS) {
       const m2 = pose.parts[id];
@@ -148,7 +185,7 @@ export class FxSystem {
     }
     this.glints(point, 30, tint, 5);
   }
-  smallShatter(pos, tint, meshCount) {
+  smallShatter(pos: Vec3, tint: Rgb, meshCount: number): void {
     for (let i = 0; i < 8; i++) {
       const out = randomUnit(this.tmpA);
       if (this.shards.length >= MAX_SHARDS)
@@ -167,7 +204,7 @@ export class FxSystem {
     }
     this.glints(pos, 12, [1, 1, 1], 3);
   }
-  update(dt, world) {
+  update(dt: number, world?: SphereCollider | null): void {
     if (dt <= 0)
       return;
     for (const p of this.particles) {
@@ -221,7 +258,7 @@ export class FxSystem {
     }
     this.shards.length = w;
   }
-  draw(renderer, meshes) {
+  draw(renderer: Renderer, meshes: MeshLibrary): void {
     for (const p of this.particles) {
       const fade = 1 - p.life / p.maxLife;
       const c = [p.color[0] * fade, p.color[1] * fade, p.color[2] * fade];
@@ -246,7 +283,7 @@ export class FxSystem {
     }
   }
 }
-function randomUnit(out) {
+function randomUnit(out: Vec3): Vec3 {
   for (; ; ) {
     const x = visualRng.sym(1), y = visualRng.sym(1), z = visualRng.sym(1);
     const l = x * x + y * y + z * z;
@@ -259,7 +296,7 @@ function randomUnit(out) {
     }
   }
 }
-function compact(list) {
+function compact<T extends { alive: boolean }>(list: T[]): void {
   let w = 0;
   for (let i = 0; i < list.length; i++) {
     const p = list[i];

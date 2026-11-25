@@ -1,8 +1,32 @@
-// @ts-nocheck
 import { Rng } from "../engine/rng";
 import { MeshBuilder, srgbHex } from "../gfx/mesh-builder";
+import type { Mesh } from "../gfx/mesh";
+import type { ItemKind, Vec3 } from "../sim/types";
 
-export const PART_IDS = [
+
+/** Rigid body parts of an enemy figure, each drawn with its own mesh and matrix. */
+export type PartId =
+  | "pelvis"
+  | "torso"
+  | "head"
+  | "upperArmL"
+  | "lowerArmL"
+  | "upperArmR"
+  | "lowerArmR"
+  | "upperLegL"
+  | "lowerLegL"
+  | "upperLegR"
+  | "lowerLegR";
+/** GPU meshes shared by the view layer (built once per device). */
+export interface MeshLibrary {
+  parts: Record<PartId, Mesh>;
+  items: Record<ItemKind, Mesh>;
+  shards: Mesh[];
+  fist: Mesh;
+  forearm: Mesh;
+  spawnRing: Mesh;
+}
+export const PART_IDS: PartId[] = [
   "pelvis",
   "torso",
   "head",
@@ -15,7 +39,7 @@ export const PART_IDS = [
   "upperLegR",
   "lowerLegR"
 ];
-export const PART_EXTENTS = {
+export const PART_EXTENTS: Record<PartId, Vec3> = {
   pelvis: [0.17, 0.08, 0.1],
   torso: [0.22, 0.28, 0.12],
   head: [0.12, 0.14, 0.12],
@@ -28,7 +52,7 @@ export const PART_EXTENTS = {
   upperLegR: [0.08, 0.21, 0.08],
   lowerLegR: [0.07, 0.21, 0.07]
 };
-export const PART_CENTER = {
+export const PART_CENTER: Record<PartId, Vec3> = {
   pelvis: [0, 0, 0],
   torso: [0, 0.28, 0],
   head: [0, 0.14, 0],
@@ -47,13 +71,13 @@ const DARK = srgbHex(2763310);
 const GLASS = srgbHex(16777215);
 const GLOVE = srgbHex(1842208);
 const GLOVE_DARK = srgbHex(1184276);
-export function buildMeshLibrary(device) {
-  const part = (fn, label) => {
+export function buildMeshLibrary(device: GPUDevice): MeshLibrary {
+  const part = (fn: (b: MeshBuilder) => void, label: string): Mesh => {
     const b = new MeshBuilder();
     fn(b);
     return b.build(device, label);
   };
-  const parts = {
+  const parts: Record<PartId, Mesh> = {
     pelvis: part((b) => b.addTaperedBox(0, 0, -0.08, 0.08, 0.26, 0.18, 0.34, 0.2, GLASS, 0.6), "pelvis"),
     torso: part((b) => {
       b.addTaperedBox(0, 0, 0, 0.3, 0.32, 0.2, 0.44, 0.24, GLASS, 0.9);
@@ -85,7 +109,7 @@ export function buildMeshLibrary(device) {
       b.addBox([0, -0.43, -0.04], [0.1, 0.06, 0.2], GLASS, 0.6);
     }, "lowerLegR")
   };
-  const items = {
+  const items: Record<ItemKind, Mesh> = {
     pistol: part((b) => {
       b.addBox([0, 0.03, -0.04], [0.04, 0.045, 0.21], WHITE);
       b.addBox([0, -0.04, 0.03], [0.036, 0.11, 0.05], OFFWHITE);
@@ -122,16 +146,16 @@ export function buildMeshLibrary(device) {
     }, "mug")
   };
   const rng = new Rng(4242);
-  const shards = [];
+  const shards: Mesh[] = [];
   for (let i = 0; i < 6; i++) {
     const s = rng.range(0.6, 1);
-    const p = () => [rng.sym(0.06) * s, rng.sym(0.06) * s, rng.sym(0.06) * s];
+    const p = (): Vec3 => [rng.sym(0.06) * s, rng.sym(0.06) * s, rng.sym(0.06) * s];
     const a = [0, 0.07 * s, 0];
     const bb = [-0.06 * s, -0.04 * s, 0.05 * s];
     const c = [0.06 * s, -0.04 * s, 0.05 * s];
     const d = [0, -0.04 * s, -0.07 * s];
     const j = p();
-    const jitter = (v) => [v[0] + j[0] * 0.4, v[1] + j[1] * 0.4, v[2] + j[2] * 0.4];
+    const jitter = (v: Vec3): Vec3 => [v[0] + j[0] * 0.4, v[1] + j[1] * 0.4, v[2] + j[2] * 0.4];
     const ja = jitter(a);
     const b = new MeshBuilder();
     b.addTri(ja, bb, c, GLASS, 1);

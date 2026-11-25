@@ -1,15 +1,37 @@
-// @ts-nocheck
 import { mat4 } from "wgpu-matrix";
+import type { Mat4 } from "wgpu-matrix";
 import { PART_IDS } from "./mesh-library";
+import type { PartId } from "./mesh-library";
+import type { EnemyKind, Vec3 } from "../sim/types";
 
-export function createPose() {
-  const parts = {};
+
+/** World matrices of every body part plus the held weapon. */
+export interface Pose {
+  parts: Record<PartId, Mat4>;
+  weapon: Mat4;
+}
+/** Interpolated enemy state that drives the procedural pose. */
+export interface PoseInput {
+  pos: Vec3;
+  yaw: number;
+  walkPhase: number;
+  moveBlend: number;
+  aimBlend: number;
+  aimPitch: number;
+  attackT: number;
+  stun: number;
+  spawnT: number;
+  twoHanded: boolean;
+  kind: EnemyKind;
+}
+export function createPose(): Pose {
+  const parts = {} as Record<PartId, Mat4>;
   for (const id of PART_IDS)
     parts[id] = mat4.create();
   return { parts, weapon: mat4.create() };
 }
 const tmp = mat4.create();
-export function computePose(p, out) {
+export function computePose(p: PoseInput, out: Pose): Pose {
   const P = out.parts;
   const move = p.moveBlend;
   const ph = p.walkPhase;
@@ -67,10 +89,10 @@ export function computePose(p, out) {
   mat4.rotateX(tmp, -Math.PI / 2, out.weapon);
   return out;
 }
-function lerp(a, b, t) {
+function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
-function easeOut(t) {
+function easeOut(t: number): number {
   const c = Math.min(1, Math.max(0, t));
   return 1 - (1 - c) * (1 - c);
 }
